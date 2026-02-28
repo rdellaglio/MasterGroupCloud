@@ -4,13 +4,20 @@ from datetime import date
 import random
 
 # ==========================================
-# [01_CONFIGURAZIONE & ICONA]
+# [01_CONFIGURAZIONE SICURA]
 # ==========================================
-# Impostiamo l'icona CANTIERE 🏗️ come richiesto
+# Titolo della scheda del browser e Icona
 st.set_page_config(page_title="MasterGroup Cloud 🏗️", layout="wide")
 
-URL = "https://clauyljovenkcqemswfk.supabase.co"
-KEY = "sb_publishable_WetwA7q8dmctM2a-VDBfTg_M46vnFi0"
+# Tentativo di lettura dai Secrets di Streamlit (per il Cloud)
+# Se non li trova (perché sei in locale), usa i valori predefiniti
+try:
+    URL = st.secrets["SUPABASE_URL"]
+    KEY = st.secrets["SUPABASE_KEY"]
+except:
+    URL = "https://clauyljovenkcqemswfk.supabase.co"
+    KEY = "sb_publishable_WetwA7q8dmctM2a-VDBfTg_M46vnFi0"
+
 headers = {
     "apikey": KEY, 
     "Authorization": f"Bearer {KEY}", 
@@ -28,9 +35,8 @@ CITAZIONI = [
     {"testo": "Usate la matita come se fosse una spada.", "autore": "Franco Albini"},
     {"testo": "La bellezza è l'armonia tra le parti.", "autore": "Leon Battista Alberti"},
     {"testo": "Non si può pensare un'architettura senza pensare alla gente.", "autore": "Richard Rogers"},
-    {"testo": "L'architettura è il gioco sapiente, rigoroso e magnifico dei volumi sotto la luce.", "autore": "Le Corbusier"},
-    {"testo": "Meno è più (Less is more).", "autore": "Mies van der Rohe"},
-    {"testo": "La forma segue la funzione.", "autore": "Louis Sullivan"}
+    {"testo": "La forma segue la funzione.", "autore": "Louis Sullivan"},
+    {"testo": "Meno è più.", "autore": "Mies van der Rohe"}
 ]
 
 def saluto_dinamico_ia(nome, task_chiusi):
@@ -42,15 +48,9 @@ def saluto_dinamico_ia(nome, task_chiusi):
     giorno_it = diz_giorni.get(giorno_sett, giorno_sett)
     
     msg = f"Buongiorno {nome}, felice {giorno_it}! "
-    
-    if task_chiusi > 10:
-        msg += f"🚀 Lo studio sta volando: abbiamo già {task_chiusi} attività completate in archivio!"
-    elif task_chiusi > 0:
-        msg += f"🔥 Ottimo ritmo, abbiamo smarcato {task_chiusi} task con successo recentemente."
-    else:
-        msg += "☕ Caffè in mano? È il momento perfetto per tracciare nuove linee di progetto."
-    
-    msg += " Oggi a Bari il clima è ideale per costruire il futuro di MasterGroup."
+    if task_chiusi > 0:
+        msg += f"🔥 MasterGroup ha già chiuso {task_chiusi} attività. "
+    msg += "Oggi a Bari il clima è ideale per costruire il futuro."
     return msg
 
 # ==========================================
@@ -60,6 +60,7 @@ def leggi_tabella(tabella):
     try:
         with httpx.Client() as client:
             res = client.get(f"{URL}/rest/v1/{tabella}?select=*", headers=headers)
+            res.raise_for_status()
             return res.json()
     except: return []
 
@@ -74,8 +75,12 @@ def scrivi_dati(tabella, dati_json):
     try:
         with httpx.Client() as client:
             res = client.post(f"{URL}/rest/v1/{tabella}", headers=headers, json=dati_json)
+            if res.status_code not in [200, 201, 204]:
+                st.error(f"Errore Cloud {res.status_code}: {res.text}")
             return res
-    except: return None
+    except Exception as e:
+        st.error(f"Errore di connessione: {e}")
+        return None
 
 def aggiorna_stato_db(id_task, nuovo_stato, nota_blocco=""):
     try:
@@ -99,7 +104,7 @@ ATTIVITA_STANDARD = [
 ]
 
 if not utenti_db:
-    st.error("⚠️ Connessione al Cloud fallita. Controlla le chiavi API.")
+    st.error("Connessione Cloud non riuscita. Verifica i Secrets su Streamlit Cloud.")
 else:
     nomi_utenti = [u['nome'] for u in utenti_db]
     utente_loggato = st.sidebar.selectbox("Accedi come:", nomi_utenti, key="main_login")
@@ -120,22 +125,19 @@ else:
         t_db = leggi_tabella("task")
         chiusi = len([t for t in t_db if t.get('stato') == 'Completato']) if t_db else 0
         
-        # 🟢 MESSAGGIO IA DINAMICO
         st.info(saluto_dinamico_ia(utente_loggato, chiusi))
         
-        # 📜 CITAZIONE RANDOM
         cit = random.choice(CITAZIONI)
         st.subheader("💡 Il pensiero del Maestro")
         st.markdown(f"> *\"{cit['testo']}\"* — **{cit['autore']}**")
         
         st.divider()
         
-        # METRICHE REALI
         c_db = leggi_tabella("commesse")
         col1, col2, col3 = st.columns(3)
         col1.metric("Progetti Attivi", len(c_db) if c_db else 0)
-        col2.metric("Lavori Chiusi", chiusi)
-        col3.metric("Stato Server", "✅ Online")
+        col2.metric("Lavori Completati", chiusi)
+        col3.metric("Stato Cloud", "🟢 Online")
 
     # ==========================================
     # [06_MODULO_COMMESSE]
@@ -152,7 +154,7 @@ else:
                 scad_c = st.date_input("Scadenza Contrattuale")
             if st.form_submit_button("Registra Progetto"):
                 scrivi_dati("commesse", {"codice": cod, "cliente": cli, "budget": bud, "scadenza": str(scad_c)})
-                st.success("Progetto registrato con successo!")
+                st.success("Progetto registrato!")
 
     # ==========================================
     # [07_MODULO_TASK]
@@ -191,7 +193,7 @@ else:
         tutti_task = leggi_task_filtrati(utente_loggato)
         
         if not tutti_task:
-            st.info("Nessun compito assegnato al momento.")
+            st.info("Nessun compito assegnato.")
         else:
             task_attivi = [t for t in tutti_task if t['stato'] != 'Completato']
             task_finiti = [t for t in tutti_task if t['stato'] == 'Completato']
@@ -204,13 +206,10 @@ else:
                                                index=["In corso", "Completato", "Bloccato"].index(t['stato']) if t['stato'] in ["In corso", "Completato", "Bloccato"] else 0,
                                                key=f"st_{t['id']}")
                     
-                    if nuovo_st == "Bloccato":
-                        nota = st.text_area("Nota blocco:", value=t.get('motivo_blocco', ""), key=f"nt_{t['id']}")
-                    else: nota = ""
+                    nota = st.text_area("Nota blocco:", value=t.get('motivo_blocco', ""), key=f"nt_{t['id']}") if nuovo_st == "Bloccato" else ""
 
                     if st.button("💾 AGGIORNA", key=f"btn_{t['id']}"):
                         if aggiorna_stato_db(t['id'], nuovo_st, nota) in [200, 204]:
-                            st.success("Aggiornato!")
                             st.rerun()
 
             st.divider()
