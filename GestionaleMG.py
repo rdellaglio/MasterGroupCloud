@@ -17,8 +17,21 @@ except:
 
 headers = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
+ATTIVITA_STANDARD = [
+    "Sopralluogo e Rilievo Strumentale", "Redazione Elaborati Grafici",
+    "Pratica Edilizia (CILA/SCIA/PdC)", "Pratica Catastale (DOCFA)",
+    "APE (Prestazione Energetica)", "Direzione Lavori", "Contabilità Lavori", "Altro..."
+]
+
+CITAZIONI = [
+    {"testo": "L'architettura è un cristallo.", "autore": "Gio Ponti"},
+    {"testo": "Dio è nei dettagli.", "autore": "Mies van der Rohe"},
+    {"testo": "L'architettura deve commuovere.", "autore": "Le Corbusier"},
+    {"testo": "Usate la matita come se fosse una spada.", "autore": "Franco Albini"}
+]
+
 # ==========================================
-# [02_FUNZIONI CORE]
+# [02_MOTORE_CLOUD]
 # ==========================================
 def leggi_tabella(tabella):
     try:
@@ -33,6 +46,14 @@ def scrivi_dati(tabella, dati_json):
             return client.post(f"{URL}/rest/v1/{tabella}", headers=headers, json=dati_json)
     except: return None
 
+def aggiorna_stato_db(id_task, nuovo_stato, nota_blocco=""):
+    try:
+        payload = {"stato": nuovo_stato, "motivo_blocco": nota_blocco}
+        with httpx.Client() as client:
+            res = client.patch(f"{URL}/rest/v1/task?id=eq.{id_task}", headers=headers, json=payload)
+            return res.status_code
+    except: return 500
+
 # ==========================================
 # [03_LOGICA DI AUTENTICAZIONE]
 # ==========================================
@@ -40,90 +61,111 @@ if "autenticato" not in st.session_state:
     st.session_state.autenticato = False
     st.session_state.utente = None
 
-def login():
+if not st.session_state.autenticato:
     st.title("🏗️ MasterGroup in Cloud")
-    st.subheader("Accesso Area Riservata")
-    
     with st.form("login_form"):
-        email_inserita = st.text_input("Email Aziendale")
-        pass_inserita = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Accedi")
-        
-        if submit:
+        email = st.text_input("Email Aziendale")
+        pwd = st.text_input("Password", type="password")
+        if st.form_submit_button("Accedi"):
             utenti = leggi_tabella("utenti")
-            # Cerchiamo l'utente che corrisponde a email e password
-            user_match = next((u for u in utenti if u.get('email') == email_inserita and u.get('password') == pass_inserita), None)
-            
-            if user_match:
+            user = next((u for u in utenti if u.get('email') == email and u.get('password') == pwd), None)
+            if user:
                 st.session_state.autenticato = True
-                st.session_state.utente = user_match
-                st.success(f"Benvenuto {user_match['nome']}!")
+                st.session_state.utente = user
                 st.rerun()
             else:
-                st.error("Credenziali errate. Riprova o contatta l'Admin.")
+                st.error("Credenziali errate.")
+    st.stop()
+
+# --- DA QUI IN POI L'UTENTE È LOGGATO ---
+u = st.session_state.utente
+nome_u = u['nome']
+ruolo_u = u['ruolo']
+
+st.sidebar.title("🏗️ MasterGroup")
+st.sidebar.write(f"Utente: **{nome_u}**")
+st.sidebar.write(f"Ruolo: **{ruolo_u}**")
+
+menu = ["🏠 Dashboard", "📋 I Miei Task"]
+if ruolo_u in ["Admin", "PM"]:
+    menu.extend(["🏗️ Nuova Commessa", "🎯 Assegna Lavoro"])
+
+scelta = st.sidebar.radio("Navigazione", menu)
+
+if st.sidebar.button("Logout"):
+    st.session_state.autenticato = False
+    st.rerun()
 
 # ==========================================
-# [04_APP PRINCIPALE]
+# [05_DASHBOARD]
 # ==========================================
-if not st.session_state.autenticato:
-    login()
-else:
-    u = st.session_state.utente
-    nome_utente = u['nome']
-    ruolo = u['ruolo']
+if scelta == "🏠 Dashboard":
+    st.header(f"Benvenuto nel Cloud, {nome_u}")
+    cit = random.choice(CITAZIONI)
+    st.info(f"💡 *\"{cit['testo']}\"* — **{cit['autore']}**")
     
-    st.sidebar.title("🏗️ MasterGroup")
-    st.sidebar.info(f"Utente: **{nome_utente}**\n\nRuolo: **{ruolo}**")
+    c_db = leggi_tabella("commesse")
+    t_db = leggi_tabella("task")
     
-    # Menu dinamico in base al ruolo
-    opzioni = ["🏠 Dashboard", "📋 I Miei Task"]
-    if ruolo in ["Admin", "PM"]:
-        opzioni.extend(["🏗️ Nuova Commessa", "🎯 Assegna Lavoro"])
-    
-    scelta = st.sidebar.radio("Navigazione", opzioni)
-    
-    if st.sidebar.button("Esci (Logout)"):
-        st.session_state.autenticato = False
-        st.rerun()
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Progetti Studio", len(c_db))
+    col2.metric("Task Totali", len(t_db))
+    col3.metric("I Miei Task", len([t for t in t_db if t['assegnato_a'] == nome_u and t['stato'] != 'Completato']))
 
-    # --- DASHBOARD ---
-    if scelta == "🏠 Dashboard":
-        st.header(f"Benvenuto, {nome_utente}")
-        # Qui aggiungeremo il meteo nel prossimo step!
-        st.write("Seleziona un'attività dal menu a sinistra per iniziare.")
-        
-        # Statistiche veloci
-        t_db = leggi_tabella("task")
-        c_db = leggi_tabella("commesse")
-        
-        col1, col2 = st.columns(2)
-        if ruolo == "Admin":
-            col1.metric("Commesse Totali", len(c_db))
-            col2.metric("Task in corso", len([t for t in t_db if t['stato'] != 'Completato']))
-        else:
-            miei_t = [t for t in t_db if t['assegnato_a'] == nome_utente]
-            col1.metric("I Miei Task", len(miei_t))
-            col2.metric("Completati", len([t for t in miei_t if t['stato'] == 'Completato']))
+# ==========================================
+# [06_NUOVA_COMMESSA]
+# ==========================================
+elif scelta == "🏗️ Nuova Commessa":
+    st.header("Registrazione Nuova Commessa")
+    with st.form("f_c", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        cod = c1.text_input("Codice (es. 2024_10)")
+        cli = c1.text_input("Cliente")
+        bud = c2.number_input("Budget (€)", min_value=0.0)
+        scad = c2.date_input("Scadenza Contrattuale")
+        if st.form_submit_button("Crea Progetto"):
+            scrivi_dati("commesse", {"codice": cod, "cliente": cli, "budget": bud, "scadenza": str(scad)})
+            st.success("Commessa creata!")
 
-    # --- MODULO TASK (ORDINATO PER PRIORITÀ) ---
-    elif scelta == "📋 I Miei Task":
-        st.header("Le tue attività")
-        t_db = leggi_tabella("task")
-        # Filtriamo solo i task dell'utente loggato
-        miei_task = [t for t in t_db if t['assegnato_a'] == nome_utente and t['stato'] != 'Completato']
-        
-        # Ordinamento: Alta -> Media -> Bassa
-        ordine_prio = {"Alta": 0, "Media": 1, "Bassa": 2}
-        miei_task.sort(key=lambda x: ordine_prio.get(x['priorita'], 3))
-        
-        if not miei_task:
-            st.success("Ottimo lavoro! Non hai task pendenti.")
-        else:
-            for t in miei_task:
-                prio_col = "🔴" if t['priorita'] == "Alta" else "🟡" if t['priorita'] == "Media" else "🟢"
-                with st.expander(f"{prio_col} {t['commessa_ref']} - {t['descrizione']}"):
-                    st.write(f"Scadenza: {t['scadenza']}")
-                    # Logica aggiornamento stato... (omessa per brevità ma presente nel tuo file locale)
+# ==========================================
+# [07_ASSEGNA_LAVORO]
+# ==========================================
+elif scelta == "🎯 Assegna Lavoro":
+    st.header("Distribuzione Task")
+    comm_db = leggi_tabella("commesse")
+    codici = [c['codice'] for c in comm_db] if comm_db else ["Nessuna"]
+    utenti_db = leggi_tabella("utenti")
+    nomi_u = [ut['nome'] for ut in utenti_db]
 
-    # --- NUOVA COMMESSA & ASSEGNAZIONE (Solo Admin/PM) ---
-    # ... (inserire qui i moduli 06 e 07 del file precedente)
+    with st.form("f_t"):
+        sel_c = st.selectbox("Progetto", codici)
+        att = st.selectbox("Attività", ATTIVITA_STANDARD)
+        chi = st.selectbox("Tecnico", nomi_u)
+        prio = st.select_slider("Priorità", options=["Bassa", "Media", "Alta"])
+        scad_t = st.date_input("Scadenza")
+        if st.form_submit_button("Invia Task"):
+            scrivi_dati("task", {
+                "commessa_ref": sel_c, "descrizione": att, "assegnato_a": chi,
+                "priorita": prio, "scadenza": str(scad_t), "stato": "In corso"
+            })
+            st.success("Task assegnato!")
+
+# ==========================================
+# [08_SCRIVANIA_OPERATORE]
+# ==========================================
+elif scelta == "📋 I Miei Task":
+    st.header(f"Attività di {nome_u}")
+    t_db = leggi_tabella("task")
+    miei = [t for t in t_db if t['assegnato_a'] == nome_u and t['stato'] != 'Completato']
+    
+    if not miei:
+        st.success("Nessun task pendente!")
+    else:
+        for t in miei:
+            with st.expander(f"📁 {t['commessa_ref']} | {t['descrizione']} ({t['priorita']})"):
+                st.write(f"Scadenza: {t['scadenza']}")
+                nuovo_st = st.selectbox("Aggiorna Stato", ["In corso", "Completato", "Bloccato"], key=f"s_{t['id']}")
+                nota = st.text_area("Note blocco", value=t.get('motivo_blocco',''), key=f"n_{t['id']}") if nuovo_st == "Bloccato" else ""
+                if st.button("Salva", key=f"b_{t['id']}"):
+                    if aggiorna_stato_db(t['id'], nuovo_st, nota) in [200, 204]:
+                        st.rerun()
