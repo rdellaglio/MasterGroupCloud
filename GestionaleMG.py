@@ -70,13 +70,57 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 # ==========================================
-# [05] DASHBOARD
+# [05] DASHBOARD (REV 01.07)
 # ==========================================
 if scelta == "🏠 Dashboard":
     st.header(f"Ciao {nome_u}, bentornato/a in Studio")
+    
+    # 1. Meteo Bari
+    try:
+        res_m = httpx.get("https://api.open-meteo.com/v1/forecast?latitude=41.11&longitude=16.87&current_weather=true").json()
+        temp = res_m["current_weather"]["temperature"]
+        st.info(f"☀️ Bari: {temp}°C. Una splendida giornata per progettare!")
+    except:
+        st.info("🌤️ MasterGroup Cloud pronto all'azione.")
+
+    # 2. Recupero Dati per Task e Scadenze
     ts = db_get("task")
-    miei = [t for t in ts if t.get('assegnato_a') == nome_u and t.get('stato') != 'Completato']
-    st.metric("I tuoi Task aperti", len(miei))
+    oggi = date.today()
+    
+    # Task aperti del singolo utente
+    miei_aperti = [t for t in ts if t.get('assegnato_a') == nome_u and t.get('stato') != 'Completato']
+    
+    # Calcolo scadenze imminenti (entro 3 giorni)
+    imminenti = 0
+    for t in miei_aperti:
+        try:
+            d_scad = date.fromisoformat(t['scadenza'])
+            if 0 <= (d_scad - oggi).days <= 3:
+                imminenti += 1
+        except: pass
+
+    # 3. Visualizzazione Metriche
+    col1, col2, col3 = st.columns(3)
+    col1.metric("I tuoi Task aperti", len(miei_aperti))
+    col2.metric("Scadenze imminenti (3gg)", imminenti, delta_color="inverse" if imminenti > 0 else "normal")
+    
+    if ruolo == "Admin":
+        cs = db_get("commesse")
+        tot_b = sum(float(c.get('budget', 0)) for c in cs)
+        col3.metric("Budget Totale Commesse", f"€ {tot_b:,.2f}")
+
+    st.divider()
+
+    # 4. Frase Motivazionale Generativa (Logica interna)
+    import random
+    citazioni = [
+        f"Forza {nome_u}, ogni grande progetto inizia con un piccolo passo.",
+        f"L'eccellenza non è un atto, ma un'abitudine. Buon lavoro, {nome_u}!",
+        "Il design è l'anima di ogni creazione umana. Rendila straordinaria oggi.",
+        f"Ehi {nome_u}, la precisione è la chiave di un buon ingegnere.",
+        "Le sfide di oggi sono i successi di domani. MasterGroup conta su di te!"
+    ]
+    st.markdown(f"**💡 Pensiero del giorno:** *{random.choice(citazioni)}*")
 
 # ==========================================
 # [06] GESTIONE TASK
@@ -153,3 +197,4 @@ elif scelta == "🎯 Assegnazione":
             if st.form_submit_button("Assegna"):
                 db_insert("task", {"commessa_ref": t1, "descrizione": t2, "assegnato_a": t3, "scadenza": str(t4), "stato": "In corso"})
                 st.success("Assegnato!"); st.rerun()
+
