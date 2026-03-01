@@ -280,24 +280,40 @@ elif scelta == "🎯 Assegnazione":
 
     tab1, tab2 = st.tabs(["🆕 Nuova Commessa", "📝 Nuovo Task"])
     
-    # --- TAB 1: CREAZIONE COMMESSA ---
+   # --- TAB 1: CREAZIONE COMMESSA (REV 01.13) ---
     with tab1:
         with st.form("form_nuova_commessa", clear_on_submit=True):
             st.subheader("Anagrafica Progetto")
             c1, c2 = st.columns(2)
             cod_c = c1.text_input("Codice Commessa")
             cli_c = c2.text_input("Cliente")
+            
             c3, c4 = st.columns(2)
             bud_c = c3.number_input("Budget Previsto (€)", min_value=0.0, step=500.0)
             scad_c = c4.date_input("Scadenza Globale Commessa", value=date.today())
             
+            # --- SELEZIONE PM (Filtro per Ruolo) ---
+            # Filtriamo gli utenti qualificati come PM o Admin dall'elenco 'us' caricato a inizio sezione
+            elenco_pm = [usr.get('nome') for usr in us if usr.get('ruolo') in ['PM', 'Admin']]
+            sel_pm = st.selectbox("Seleziona PM Responsabile", elenco_pm)
+            
             if st.form_submit_button("Crea Commessa"):
                 if cod_c and cli_c:
-                    res_c = db_insert("commesse", {"codice": cod_c, "cliente": cli_c, "budget": bud_c, "scadenza": str(scad_c)})
-                    if res_c.status_code in [200, 201]: 
-                        st.success(f"✅ Commessa {cod_c} creata!"); st.rerun()
-                else: st.warning("Compila i campi obbligatori.")
-
+                    payload_c = {
+                        "codice": cod_c, 
+                        "cliente": cli_c, 
+                        "budget": bud_c, 
+                        "scadenza": str(scad_c),
+                        "pm_assegnato": sel_pm  # Nome colonna corretto del tuo DB
+                    }
+                    res_c = db_insert("commesse", payload_c)
+                    if res_c.status_code in [200, 201]:
+                        st.success(f"✅ Commessa {cod_c} creata e affidata a {sel_pm}!")
+                        st.rerun()
+                    else:
+                        st.error(f"Errore DB: {res_c.status_code}. Verifica la tabella 'commesse'.")
+                else:
+                    st.warning("Codice e Cliente sono obbligatori.")
     # --- TAB 2: CREAZIONE TASK (CON MEMORIA) ---
     with tab2:
         if not cs:
@@ -346,5 +362,6 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
+
 
 
