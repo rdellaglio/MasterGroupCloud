@@ -3,7 +3,7 @@ import httpx
 import smtplib
 from email.mime.text import MIMEText
 from datetime import date, datetime
-# REV 01.01
+#REV 01.03
 # ==========================================
 # [01] CONFIGURAZIONE & BRANDING
 # ==========================================
@@ -15,35 +15,26 @@ TASK_STANDARD = [
     "Contabilità (SAL)", "Sicurezza (PSC / POS)", "Pratica ENEA", "Redazione Elaborati Grafici"
 ]
 
+# CSS per pulizia interfaccia
 st.markdown("""
     <style>
     footer {visibility: hidden;}
     .stDeployButton {display:none;}
     [data-testid="stHeader"] {background-color: rgba(0,0,0,0); height: 3rem;}
-    [data-testid="stSidebarNav"] {padding-top: 20px;}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# [02] CONNESSIONE & SEGRETI
+# [02] CONNESSIONE & MOTORE DB
 # ==========================================
 URL = st.secrets.get("SUPABASE_URL")
 KEY = st.secrets.get("SUPABASE_KEY")
-MAIL_USER = st.secrets.get("EMAIL_MITTENTE")
-MAIL_PASS = st.secrets.get("EMAIL_PASSWORD")
-
-if not URL or not KEY:
-    st.error("⚠️ Chiavi configurazione mancanti!")
-    st.stop()
-
 HEADERS = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
-# ==========================================
-# [03] FUNZIONI MOTORE
-# ==========================================
 def db_get(tabella):
     try:
-        res = httpx.get(f"{URL}/rest/v1/{tabella}?select=*", headers=HEADERS, timeout=10)
+        # Cache killer per dati sempre freschi
+        res = httpx.get(f"{URL}/rest/v1/{tabella}?select=*&t={datetime.now().timestamp()}", headers=HEADERS, timeout=10)
         return res.json() if res.status_code == 200 else []
     except: return []
 
@@ -61,7 +52,7 @@ def get_meteo_bari():
     except: return "🌤️ MasterGroup Cloud pronto."
 
 # ==========================================
-# [04] ACCESSO
+# [03] GESTIONE ACCESSO
 # ==========================================
 if "u" not in st.session_state:
     st.title("🏗️ MasterGroup Cloud")
@@ -70,25 +61,23 @@ if "u" not in st.session_state:
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Accedi"):
             utenti = db_get("utenti")
-            user = next((x for x in utenti if str(x.get('email', '')).lower() == m and str(x.get('password')) == p), None)
+            user = next((x for x in utenti if str(x.get('email', '')).lower() == m and str(x.get('password', '')) == p), None)
             if user:
                 st.session_state.u = user
                 st.rerun()
-            else: st.error("Credenziali non valide.")
+            else: st.error("Email o Password errati.")
     st.stop()
 
 u = st.session_state.u
 ruolo, nome_u = u.get('ruolo'), u.get('nome')
 
 # ==========================================
-# [05] SIDEBAR
+# [04] SIDEBAR & NAVIGAZIONE
 # ==========================================
 st.sidebar.title("MasterGroup")
-st.sidebar.write(f"👤 **{nome_u}**")
-st.sidebar.write(f"💼 Ruolo: {ruolo}")
+st.sidebar.write(f"👤 **{nome_u}** ({ruolo})")
 st.sidebar.divider()
 
-# Rimosso il menu Approvazioni
 menu = ["🏠 Dashboard", "📋 Gestione Task"]
 if ruolo in ["Admin", "PM"]: menu.extend(["📊 Analisi Commesse", "🎯 Assegnazione"])
 
@@ -98,17 +87,24 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 # ==========================================
-# [06] DASHBOARD (Soluzione Genere Neutro)
+# [05] DASHBOARD (GENDER NEUTRAL)
 # ==========================================
 if scelta == "🏠 Dashboard":
-    st.header(f"Ciao {nome_u}, bentornato/a")
+    st.header(f"Ciao {nome_u}, bentornato/a in Studio")
     st.info(get_meteo_bari())
+    
     ts = db_get("task")
     miei = [t for t in ts if t.get('assegnato_a') == nome_u and t.get('stato') != 'Completato']
-    st.metric("I tuoi Task aperti", len(miei))
+    
+    c1, c2 = st.columns(2)
+    c1.metric("I tuoi Task aperti", len(miei))
+    if ruolo == "Admin":
+        cs = db_get("commesse")
+        tot_budget = sum(float(c.get('budget', 0)) for c in cs)
+        c2.metric("Budget Totale Commesse", f"€ {tot_budget:,.2f}")
 
 # ==========================================
-# [07] GESTIONE TASK
+# [06] GESTIONE TASK
 # ==========================================
 elif scelta == "📋 Gestione Task":
     st.header("Monitoraggio Attività")
@@ -136,68 +132,65 @@ elif scelta == "📋 Gestione Task":
         except: label, d_scad = "📅 Data n.d.", oggi
         
         with st.expander(f"{label} | {t.get('commessa_ref')} - {t.get('descrizione')}"):
-            # Modifica Riassegnazione solo per Admin
             if ruolo == "Admin":
-                st.subheader("🛠️ Modifica Avanzata (Admin)")
+                st.subheader("🛠️ Riassegnazione (Admin)")
                 l_nomi = [usr.get('nome') for usr in us]
-                n_tec = st.selectbox("Cambia Tecnico", l_nomi, index=l_nomi.index(t['assegnato_a']) if t['assegnato_a'] in l_nomi else 0, key=f"re_{t['id']}")
-                n_scad = st.date_input("Cambia Scadenza", value=d_scad, key=f"sc_{t['id']}")
+                n_tec = st.selectbox("Tecnico", l_nomi, index=l_nomi.index(t['assegnato_a']) if t['assegnato_a'] in l_nomi else 0, key=f"re_{t['id']}")
+                n_scad = st.date_input("Scadenza", value=d_scad, key=f"sc_{t['id']}")
                 if st.button("Salva Modifiche", key=f"save_{t['id']}"):
                     db_update("task", t['id'], {"assegnato_a": n_tec, "scadenza": str(n_scad)})
-                    st.success("Task aggiornato!")
+                    st.success("Modificato!")
                     st.rerun()
             
             st.divider()
             stati_v = ["In corso", "Completato", "Bloccato"]
             curr_st = t.get('stato', 'In corso')
             idx_s = stati_v.index(curr_st) if curr_st in stati_v else 0
-            n_st = st.selectbox("Cambia Stato", stati_v, index=idx_s, key=f"st_{t['id']}")
-            if st.button("Aggiorna Stato", key=f"up_{t['id']}"):
+            n_st = st.selectbox("Aggiorna Stato", stati_v, index=idx_s, key=f"st_{t['id']}")
+            if st.button("Conferma Stato", key=f"up_{t['id']}"):
                 db_update("task", t['id'], {"stato": n_st})
-                st.success("Stato aggiornato!")
                 st.rerun()
 
 # ==========================================
-# [08] ANALISI COMMESSE
+# [07] ANALISI COMMESSE (USO CAMPO BUDGET)
 # ==========================================
 elif scelta == "📊 Analisi Commesse":
-    st.header("Avanzamento Progetti")
+    st.header("Stato Avanzamento Progetti")
     cs, ts, oggi = db_get("commesse"), db_get("task"), date.today()
     for c in cs:
         t_comm = [t for t in ts if t.get('commessa_ref') == c.get('codice')]
         chiusi = len([t for t in t_comm if t['stato'] == 'Completato'])
         perc = (chiusi / len(t_comm) * 100) if t_comm else 0
         with st.expander(f"📂 {c['codice']} - {c['cliente']} ({int(perc)}%)"):
-            st.write(f"💰 Valore commessa: **€ {c.get('valore', '0')}**") # Ripristinato Valore
+            if ruolo == "Admin":
+                st.write(f"💰 Budget: **€ {c.get('budget', 0):,.2f}**")
             st.progress(perc / 100)
             for tc in t_comm:
-                try:
-                    d_s = datetime.strptime(tc['scadenza'], '%Y-%m-%d').date()
-                    diff = (d_s - oggi).days
-                    icona = "✅" if tc['stato'] == 'Completato' else "⏰" if diff < 0 else "🟢"
-                except: icona = "📅"
-                st.write(f"{icona} **{tc.get('assegnato_a')}**: {tc.get('descrizione')}")
+                st.write(f"- {tc.get('assegnato_a')}: {tc.get('descrizione')} [{tc.get('stato')}]")
 
 # ==========================================
-# [09] ASSEGNAZIONE (Valore Commessa Ripristinato)
+# [08] ASSEGNAZIONE (RIPRISTINO BUDGET)
 # ==========================================
 elif scelta == "🎯 Assegnazione":
-    st.header("Nuova Gestione")
+    st.header("Nuova Commessa o Task")
     tab1, tab2 = st.tabs(["🆕 Commessa", "📝 Task"])
     with tab1:
-        with st.form("f_c"):
-            c_cod = st.text_input("Codice Commessa")
-            c_cli = st.text_input("Nome Cliente")
-            c_val = st.number_input("Valore Commessa (€)", min_value=0, step=100) # Ripristinato
+        with st.form("f_c", clear_on_submit=True):
+            c_cod = st.text_input("Codice")
+            c_cli = st.text_input("Cliente")
+            c_bud = st.number_input("Budget / Valore (€)", min_value=0.0, step=500.0) # Uso nome Budget
             if st.form_submit_button("Crea Commessa"):
-                db_insert("commesse", {"codice": c_cod, "cliente": c_cli, "valore": c_val})
-                st.success("Commessa creata!")
+                if c_cod and c_cli:
+                    res = db_insert("commesse", {"codice": c_cod, "cliente": c_cli, "budget": c_bud})
+                    if res.status_code in [200, 201]: st.success("Commessa creata!"); st.rerun()
+                    else: st.error(f"Errore DB: {res.status_code}. Verifica campo 'budget' su Supabase.")
     with tab2:
-        with st.form("f_t"):
-            t_comm = st.selectbox("Seleziona Commessa", [c['codice'] for c in db_get("commesse")])
-            t_desc = st.selectbox("Attività Standard", TASK_STANDARD)
-            t_tec = st.selectbox("Assegna Tecnico", [u['nome'] for u in db_get("utenti")])
-            t_scad = st.date_input("Scadenza Task")
-            if st.form_submit_button("Crea Task"):
+        with st.form("f_t", clear_on_submit=True):
+            comms = [c['codice'] for c in db_get("commesse")]
+            t_comm = st.selectbox("Commessa", comms)
+            t_desc = st.selectbox("Attività", TASK_STANDARD)
+            t_tec = st.selectbox("Tecnico", [u['nome'] for u in db_get("utenti")])
+            t_scad = st.date_input("Scadenza")
+            if st.form_submit_button("Assegna Task"):
                 db_insert("task", {"commessa_ref": t_comm, "descrizione": t_desc, "assegnato_a": t_tec, "scadenza": str(t_scad), "stato": "In corso"})
-                st.success("Task creato ed assegnato!")
+                st.success("Task creato!")
