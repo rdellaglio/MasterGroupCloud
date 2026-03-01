@@ -268,35 +268,44 @@ elif scelta == "🎯 Assegnazione":
 # [10] APPROVAZIONI
 # ==========================================
 elif scelta == "⚖️ Approvazioni":
-    st.header("Task e Modifiche da Validare")
-    # Leggiamo tutti i task e filtriamo quelli NON approvati
-    tutto_db = db_get("task")
-    da_val = [t for t in tutto_db if t.get('approvato_admin') == False]
+    st.header("Validazione Modifiche e Nuovi Task")
     
-    us = db_get("utenti")
-    if not da_val: 
-        st.info("Nessuna pendenza. Tutti i task sono stati validati.")
+    # Carichiamo i dati freschi ogni volta
+    tasks_raw = db_get("task")
+    utenti_all = db_get("utenti")
+    
+    # Filtro super-sicuro: cerca tutto ciò che non ha approvato_admin = True
+    # Gestisce anche i casi in cui il valore è nullo (None)
+    da_val = [t for t in tasks_raw if t.get('approvato_admin') is False]
+    
+    if not da_val:
+        st.info("✅ Nessuna attività in attesa. Tutto è stato approvato.")
     else:
-        st.write(f"Ci sono {len(da_val)} attività che richiedono il tuo OK:")
+        st.warning(f"Attenzione: ci sono {len(da_val)} modifiche da convalidare.")
         for v in da_val:
             with st.container():
                 st.markdown("---")
-                c_tx, c_bt = st.columns([4, 1])
-                # Specifichiamo meglio cosa stiamo approvando
-                info_task = f"📌 **{v.get('assegnato_a')}**: {v.get('descrizione')} \n\n SCADENZA: {v.get('scadenza')} | COMMESSA: {v.get('commessa_ref')}"
-                c_tx.warning(info_task)
+                c_info, c_azione = st.columns([3, 1])
                 
-                if c_bt.button("✅ VALIDA MODIFICA", key=f"ok_{v['id']}"):
-                    # Azione 1: Riporta approvato_admin a True
-                    successo = db_update("task", v['id'], {"approvato_admin": True})
+                testo_task = f"""
+                **Operatore:** {v.get('assegnato_a')}  
+                **Attività:** {v.get('descrizione')}  
+                **Commessa:** {v.get('commessa_ref')}  
+                **Scadenza proposta:** {v.get('scadenza')}
+                """
+                c_info.markdown(testo_task)
+                
+                if c_azione.button("✅ APPROVA", key=f"v_ok_{v['id']}"):
+                    # Forza il database a mettere TRUE
+                    db_update("task", v['id'], {"approvato_admin": True})
                     
-                    # Azione 2: Notifica il tecnico del nuovo incarico
-                    t_info = next((usr for usr in us if usr['nome'] == v['assegnato_a']), None)
-                    if t_info and t_info.get('email'):
-                        corpo = f"Ciao {v['assegnato_a']},\nIl task '{v['descrizione']}' è stato confermato dall'Admin.\nPuoi procedere con il lavoro."
-                        invia_mail(t_info['email'], "[MasterGroup] Task Confermato", corpo)
+                    # Notifica Email al Tecnico (se presente)
+                    t_mail = next((u.get('email') for u in utenti_all if u.get('nome') == v.get('assegnato_a')), None)
+                    if t_mail:
+                        invia_mail(t_mail, "[MasterGroup] Task Confermato", f"Il task {v.get('descrizione')} è stato approvato dall'Admin.")
                     
-                    st.success("Task validato correttamente!")
+                    st.success("Approvato!")
                     st.rerun()
+
 
 
