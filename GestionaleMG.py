@@ -4,6 +4,27 @@ from datetime import date
 import random
 
 # ==========================================
+# [01_CONFIGURAZIONE & PULIZIA INTERFACCIA]
+# ==========================================
+st.set_page_config(page_title="MasterGroup Cloud 🏗️", layout="wide")
+
+# Questo blocco nasconde il menu Streamlit e il footer "Made with Streamlit"
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stDeployButton {display:none;}
+    </style>
+    """, unsafe_allow_value=True)
+
+try:
+    URL = st.secrets["SUPABASE_URL"]
+    KEY = st.secrets["SUPABASE_KEY"]
+except:
+    URL = "https://clauyljovenkcqemswfk.supabase.co"
+    KEY = "sb_publishable_WetwA7q8dmctM2a-VDBfTg_M46vnFi0"
+# ==========================================
 # [01_CONFIGURAZIONE & SECRETS]
 # ==========================================
 st.set_page_config(page_title="MasterGroup Cloud 🏗️", layout="wide")
@@ -235,3 +256,4 @@ elif scelta == "⚖️ Approvazioni":
         if st.button("Approva", key=f"ok_{v['id']}"):
             aggiorna_db("task", v['id'], {"approvato_admin": True})
             st.rerun()
+
