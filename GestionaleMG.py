@@ -10,9 +10,38 @@ from datetime import date, datetime
 st.set_page_config(page_title="MasterGroup Cloud", page_icon="🏗️", layout="wide")
 
 TASK_STANDARD = [
-    "CME (Computo Metrico Estimativo)", "CILA / SCIA / PdC", "DOCFA (Variazione Catastale)", 
-    "APE (Attestato Energetico)", "Relazione Legge 10", "Sopralluogo / Rilievo",
-    "Contabilità (SAL)", "Sicurezza (PSC / POS)", "Pratica ENEA", "Redazione Elaborati Grafici"
+    "--- 1. AMMINISTRAZIONE ---",
+    "Contratto e Incarico Professionale",
+    "Preventivo e Computo Preliminare",
+    "Pratiche Detrazioni Fiscali",
+    "--- 2. RILIEVI E DIAGNOSI ---",
+    "Sopralluogo e Rilievo Architettonico",
+    "Rilievo Materico e del Degrado",
+    "Indagini Tecniche e Strutturali",
+    "--- 3. PROGETTAZIONE E GRAFICA ---",
+    "Elaborati Stato di Fatto",
+    "Progetto di Variante (Giallo/Rossi)",
+    "Progetto Esecutivo / Stato di Progetto",
+    "Rendering e Fotoinserimenti",
+    "--- 4. IMPIANTI ---",
+    "Relazione Energetica (Legge 10)",
+    "Progetto Impianto Idrico-Sanitario",
+    "Progetto Impianto Elettrico / Domotico",
+    "Progetto VMC e Climatizzazione",
+    "--- 5. PRATICHE E AUTORIZZAZIONI ---",
+    "Pratica Edilizia (CILA/SCIA/PdC)",
+    "Pratica Sismica (Genio Civile)",
+    "Autorizzazione Paesaggistica / Soprintendenza",
+    "Variazione Catastale (DOCFA)",
+    "Segnalazione Certificata Agibilità (SCA)",
+    "Attestato di Prestazione Energetica (APE)",
+    "--- 6. CANTIERE E CHIUSURA ---",
+    "Direzione Lavori",
+    "Coordinamento Sicurezza (PSC/POS)",
+    "Contabilità Lavori (SAL/Libretto)",
+    "Collaudo e Fine Lavori",
+    "--- 7. EXTRA ---",
+    "Altro (Specifica nel campo personalizzato...)"
 ]
 
 # ==========================================
@@ -317,4 +346,5 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
+
 
