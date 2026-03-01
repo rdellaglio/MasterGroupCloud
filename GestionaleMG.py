@@ -123,43 +123,103 @@ if scelta == "🏠 Dashboard":
     st.markdown(f"**💡 Pensiero del giorno:** *{random.choice(citazioni)}*")
 
 # ==========================================
-# [06] GESTIONE TASK
+# [06] GESTIONE TASK (OPERATIVITÀ & PRIORITÀ) REV 01.08
 # ==========================================
 elif scelta == "📋 Gestione Task":
     st.header("Monitoraggio Attività")
     ts, cs, us = db_get("task"), db_get("commesse"), db_get("utenti")
     oggi = date.today()
 
-    f1, f2, f3 = st.columns(3)
-    s_tec = nome_u if ruolo == "Operatore" else f1.selectbox("Tecnico", ["Tutti"] + [usr.get('nome') for usr in us])
-    s_com = f2.selectbox("Commessa", ["Tutte"] + [cm.get('codice') for cm in cs])
-    s_sta = f3.selectbox("Stato", ["Tutti", "In corso", "Bloccato", "Completato"])
+    # --- FILTRI INCROCIATI ---
+    f1, f2, f3, f4 = st.columns(4)
+    
+    # Filtro Tecnico: Solo Admin e PM scelgono, Operatore vede solo i suoi
+    if ruolo in ["Admin", "PM"]:
+        sel_tec = f1.selectbox("Filtra Tecnico", ["Tutti"] + [usr.get('nome') for usr in us])
+    else:
+        sel_tec = nome_u
+        f1.write(f"**Tecnico:** {nome_u}")
 
+    sel_com = f2.selectbox("Filtra Commessa", ["Tutte"] + [cm.get('codice') for cm in cs])
+    sel_sta = f3.selectbox("Filtra Stato", ["In corso", "Bloccato", "Completato", "Tutti"], index=0)
+    mostra_chiusi = f4.checkbox("Mostra Completati", value=False)
+
+    # --- LOGICA FILTRO ---
     f_t = ts
-    if s_tec != "Tutti" and ruolo != "Operatore": f_t = [t for t in f_t if t.get('assegnato_a') == s_tec]
-    elif ruolo == "Operatore": f_t = [t for t in f_t if t.get('assegnato_a') == nome_u]
-    if s_com != "Tutte": f_t = [t for t in f_t if t.get('commessa_ref') == s_com]
-    if s_sta != "Tutti": f_t = [t for t in f_t if t.get('stato') == s_sta]
+    # 1. Filtro Tecnico
+    if sel_tec != "Tutti": 
+        f_t = [t for t in f_t if t.get('assegnato_a') == sel_tec]
+    # 2. Filtro Commessa
+    if sel_com != "Tutte": 
+        f_t = [t for t in f_t if t.get('commessa_ref') == sel_com]
+    # 3. Filtro Stato e Chiusi
+    if not mostra_chiusi:
+        f_t = [t for t in f_t if t.get('stato') != 'Completato']
+    elif sel_sta != "Tutti":
+        f_t = [t for t in f_t if t.get('stato') == sel_sta]
+
+    # --- ORDINAMENTO CRONOLOGICO (Scaduti e Imminenti prima) ---
+    def calcola_priorita(task):
+        try:
+            d = date.fromisoformat(task.get('scadenza'))
+            return d
+        except:
+            return date(9999, 12, 31)
+
+    f_t.sort(key=calcola_priorita)
+
+    # --- VISUALIZZAZIONE TASK ---
+    if not f_t:
+        st.info("Nessun task trovato con questi filtri.")
     
     for t in f_t:
-        with st.expander(f"📌 {t.get('commessa_ref')} - {t.get('descrizione')} ({t.get('stato')})"):
-            # MODIFICA SOLO PER ADMIN
-            if ruolo == "Admin":
-                st.subheader("🛠️ Modifica Task")
-                l_utenti = [usr.get('nome') for usr in us]
-                n_tec = st.selectbox("Riassegna a", l_utenti, index=l_utenti.index(t['assegnato_a']) if t['assegnato_a'] in l_utenti else 0, key=f"te_{t['id']}")
-                n_sca = st.date_input("Nuova Scadenza", value=date.fromisoformat(t['scadenza']) if t.get('scadenza') else oggi, key=f"sc_{t['id']}")
-                if st.button("Salva Modifiche", key=f"bt_{t['id']}"):
-                    db_update("task", t['id'], {"assegnato_a": n_tec, "scadenza": str(n_sca)})
-                    st.success("Aggiornato!"); st.rerun()
-            
-            st.divider()
-            # AGGIORNAMENTO STATO PER TUTTI
-            n_st = st.selectbox("Cambia Stato", ["In corso", "Completato", "Bloccato"], key=f"st_{t['id']}")
-            if st.button("Aggiorna Stato", key=f"up_{t['id']}"):
-                db_update("task", t['id'], {"stato": n_st})
-                st.success("Stato salvato!"); st.rerun()
+        try:
+            d_scad = date.fromisoformat(t['scadenza'])
+            diff = (d_scad - oggi).days
+            if t.get('stato') == 'Completato':
+                icona, label = "✅", "COMPLETATO"
+            elif diff < 0:
+                icona, label = "⏰", f"SCADUTO ({abs(diff)}gg)"
+            elif diff <= 3:
+                icona, label = "⏳", f"IMMINENTE ({diff}gg)"
+            else:
+                icona, label = "📅", f"In scadenza tra {diff}gg"
+        except:
+            icona, label = "❓", "Data non definita"
 
+        titolo_expander = f"{icona} {label} | {t.get('commessa_ref')} - {t.get('descrizione')}"
+        
+        with st.expander(titolo_expander):
+            st.write(f"**Assegnato a:** {t.get('assegnato_a')}")
+            
+            # 🛠️ RIASSEGNAZIONE (SOLO ADMIN)
+            if ruolo == "Admin":
+                st.divider()
+                st.subheader("🛠️ Modifica Avanzata (Admin)")
+                l_nomi = [usr.get('nome') for usr in us]
+                idx_u = l_nomi.index(t['assegnato_a']) if t['assegnato_a'] in l_nomi else 0
+                
+                c_u, c_d = st.columns(2)
+                nuovo_u = c_u.selectbox("Cambia Tecnico", l_nomi, index=idx_u, key=f"re_{t['id']}")
+                nuova_d = c_d.date_input("Cambia Scadenza", value=d_scad, key=f"sc_{t['id']}")
+                
+                if st.button("Salva modifiche Admin", key=f"btn_adm_{t['id']}"):
+                    db_update("task", t['id'], {"assegnato_a": nuovo_u, "scadenza": str(nuova_d)})
+                    st.success("Task aggiornato!")
+                    st.rerun()
+
+            st.divider()
+            
+            # 📈 AGGIORNAMENTO STATO (PER TUTTI)
+            st.subheader("📈 Aggiorna Stato")
+            stati_lista = ["In corso", "Bloccato", "Completato"]
+            idx_s = stati_lista.index(t['stato']) if t['stato'] in stati_lista else 0
+            n_stato = st.selectbox("Nuovo Stato", stati_lista, index=idx_s, key=f"st_{t['id']}")
+            
+            if st.button("Conferma Cambio Stato", key=f"up_{t['id']}"):
+                db_update("task", t['id'], {"stato": n_stato})
+                st.success("Stato aggiornato!")
+                st.rerun()
 # ==========================================
 # [07] ANALISI COMMESSE
 # ==========================================
@@ -197,4 +257,5 @@ elif scelta == "🎯 Assegnazione":
             if st.form_submit_button("Assegna"):
                 db_insert("task", {"commessa_ref": t1, "descrizione": t2, "assegnato_a": t3, "scadenza": str(t4), "stato": "In corso"})
                 st.success("Assegnato!"); st.rerun()
+
 
