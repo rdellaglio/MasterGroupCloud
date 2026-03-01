@@ -8,27 +8,18 @@ import random
 # ==========================================
 st.set_page_config(page_title="MasterGroup Cloud 🏗️", layout="wide")
 
-# Questo blocco nasconde il menu Streamlit e il footer "Made with Streamlit"
+# CSS per nascondere i menu di sistema Streamlit (App Pulita)
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .stDeployButton {display:none;}
+    [data-testid="stToolbar"] {visibility: hidden !important;}
     </style>
-    """, unsafe_allow_value=True)
+    """, unsafe_allow_html=True)
 
-try:
-    URL = st.secrets["SUPABASE_URL"]
-    KEY = st.secrets["SUPABASE_KEY"]
-except:
-    URL = "https://clauyljovenkcqemswfk.supabase.co"
-    KEY = "sb_publishable_WetwA7q8dmctM2a-VDBfTg_M46vnFi0"
-# ==========================================
-# [01_CONFIGURAZIONE & SECRETS]
-# ==========================================
-st.set_page_config(page_title="MasterGroup Cloud 🏗️", layout="wide")
-
+# Recupero chiavi dai Secrets (o valori fissi)
 try:
     URL = st.secrets["SUPABASE_URL"]
     KEY = st.secrets["SUPABASE_KEY"]
@@ -83,7 +74,8 @@ if "autenticato" not in st.session_state:
 
 if not st.session_state.autenticato:
     st.title("🏗️ MasterGroup in Cloud")
-    with st.form("login"):
+    st.subheader("Accesso Area Riservata")
+    with st.form("login_form"):
         e = st.text_input("Email Aziendale")
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Entra"):
@@ -125,26 +117,26 @@ if st.sidebar.button("Logout"):
 if scelta == "🏠 Dashboard":
     st.header(f"Benvenuto, {nome_log}")
     
-    # IA & Citazione
     cit = random.choice(CITAZIONI)
-    st.info(f"🌤️ **Meteo Bari:** Sereno (21°C). Ottimo clima per il sopralluogo!\n\n💡 *\"{cit['t']}\"* — {cit['a']}")
+    st.info(f"🌤️ **Meteo Bari:** Sereno (21°C). Buon lavoro!\n\n💡 *\"{cit['t']}\"* — {cit['a']}")
     
     t_db = leggi_tabella("task")
     bloccati = [t for t in t_db if t.get('stato') == 'Bloccato']
     
     col1, col2 = st.columns(2)
-    col1.metric("Miei Task Attivi", len([t for t in t_db if t['assegnato_a'] == nome_log and t['stato'] != 'Completato']))
+    miei_task = [t for t in t_db if t['assegnato_a'] == nome_log and t['stato'] != 'Completato']
+    col1.metric("Miei Task Attivi", len(miei_task))
     
     if ruolo in ["Admin", "PM"]:
         col2.metric("🆘 Criticità Studio", len(bloccati), delta_color="inverse")
         if bloccati:
-            st.warning(f"Ci sono {len(bloccati)} attività bloccate che richiedono attenzione.")
+            st.warning(f"Attenzione: {len(bloccati)} attività risultano bloccate.")
 
 # ==========================================
-# [06_GESTIONE TASK (CON FILTRI & ORDINE)]
+# [06_GESTIONE TASK]
 # ==========================================
 elif scelta == "📋 Gestione Task":
-    st.header("Lista Attività e Filtri")
+    st.header("Lista Attività")
     t_db = leggi_tabella("task")
     utenti_list = leggi_tabella("utenti")
     
@@ -176,7 +168,7 @@ elif scelta == "📋 Gestione Task":
                 nuovo_st = st.selectbox("Aggiorna Stato", ["In corso", "Completato", "Bloccato"], key=f"st_{t['id']}")
                 nota = ""
                 if nuovo_st == "Bloccato":
-                    nota = st.text_area("Perché è bloccato?", value=t.get('motivo_blocco',''), key=f"nt_{t['id']}")
+                    nota = st.text_area("Nota blocco", value=t.get('motivo_blocco',''), key=f"nt_{t['id']}")
                 if st.button("Salva", key=f"btn_{t['id']}"):
                     aggiorna_db("task", t['id'], {"stato": nuovo_st, "motivo_blocco": nota})
                     st.rerun()
@@ -185,7 +177,7 @@ elif scelta == "📋 Gestione Task":
 # [07_ANALISI COMMESSE INTERATTIVA]
 # ==========================================
 elif scelta == "📊 Analisi Commesse":
-    st.header("Avanzamento Progetti e Criticità")
+    st.header("Avanzamento Progetti")
     c_db = leggi_tabella("commesse")
     t_db = leggi_tabella("task")
     
@@ -205,31 +197,30 @@ elif scelta == "📊 Analisi Commesse":
             with col_p:
                 st.progress(perc / 100)
             
-            st.write("**Dettaglio Team:**")
+            st.write("**Dettaglio Attività:**")
             for tc in t_comm:
                 st.write(f"- {'✅' if tc['stato']=='Completato' else '⏳'} **{tc['assegnato_a']}**: {tc['descrizione']} ({tc['priorita']})")
-                if tc['stato'] == "Bloccato": st.caption(f"↳ 🆘 Bloccato: {tc.get('motivo_blocco')}")
 
 # ==========================================
-# [08_ASSEGNAZIONE (ADMIN & PM)]
+# [08_ASSEGNAZIONE]
 # ==========================================
 elif scelta == "🎯 Assegnazione":
-    st.tabs_list = st.tabs(["🆕 Nuova Commessa", "📝 Nuovo Task"])
+    tab1, tab2 = st.tabs(["🏗️ Commessa", "📝 Task"])
     
-    with st.tabs_list[0]:
+    with tab1:
         with st.form("f_comm"):
             c1, c2 = st.columns(2)
-            cod = c1.text_input("Codice Progetto")
+            cod = c1.text_input("Codice")
             cli = c1.text_input("Cliente")
             utenti = leggi_tabella("utenti")
             pms = [u['nome'] for u in utenti if u['ruolo'] in ["PM", "Admin"]]
-            pm_sel = c2.selectbox("PM Responsabile", pms)
+            pm_sel = c2.selectbox("Responsabile PM", pms)
             bud = c2.number_input("Budget (€)", min_value=0.0)
             if st.form_submit_button("Crea Commessa"):
                 scrivi_dati("commesse", {"codice": cod, "cliente": cli, "pm_assegnato": pm_sel, "budget": bud, "scadenza": str(date.today())})
-                st.success("Commessa registrata!")
+                st.success("Commessa creata!")
 
-    with st.tabs_list[1]:
+    with tab2:
         with st.form("f_task"):
             c_db = leggi_tabella("commesse")
             sel_c = st.selectbox("Progetto", [c['codice'] for c in c_db] if c_db else ["Nessuna"])
@@ -244,16 +235,15 @@ elif scelta == "🎯 Assegnazione":
                 st.success("Task inviato!")
 
 # ==========================================
-# [09_APPROVAZIONI (SOLO ADMIN)]
+# [09_APPROVAZIONI ADMIN]
 # ==========================================
 elif scelta == "⚖️ Approvazioni":
-    st.header("Validazione Task PM")
+    st.header("Validazione Task")
     t_all = leggi_tabella("task")
     da_val = [t for t in t_all if t.get('approvato_admin') == False]
-    if not da_val: st.success("Tutto approvato!")
+    if not da_val: st.success("Nessun task in attesa.")
     for v in da_val:
         st.warning(f"Task: {v['descrizione']} | PM: {v.get('commessa_ref')} | Prio: {v['priorita']}")
         if st.button("Approva", key=f"ok_{v['id']}"):
             aggiorna_db("task", v['id'], {"approvato_admin": True})
             st.rerun()
-
