@@ -269,19 +269,34 @@ elif scelta == "🎯 Assegnazione":
 # ==========================================
 elif scelta == "⚖️ Approvazioni":
     st.header("Task e Modifiche da Validare")
-    da_val = [t for t in db_get("task") if t.get('approvato_admin') == False]
+    # Leggiamo tutti i task e filtriamo quelli NON approvati
+    tutto_db = db_get("task")
+    da_val = [t for t in tutto_db if t.get('approvato_admin') == False]
+    
     us = db_get("utenti")
-    if not da_val: st.info("Nessuna pendenza.")
-    for v in da_val:
-        with st.container():
-            c_tx, c_bt = st.columns([4, 1])
-            c_tx.warning(f"📌 {v.get('assegnato_a')}: {v.get('descrizione')} su {v.get('commessa_ref')} (Scadenza: {v['scadenza']})")
-            if c_bt.button("✅ APPROVA", key=f"ok_{v['id']}"):
-                db_update("task", v['id'], {"approvato_admin": True})
-                # Invio Mail
-                t_info = next((usr for usr in us if usr['nome'] == v['assegnato_a']), None)
-                if t_info and t_info.get('email'):
-                    corpo = f"Ciao {v['assegnato_a']}, il task {v['descrizione']} è pronto per te.\nScadenza: {v['scadenza']}"
-                    invia_mail(t_info['email'], "[MasterGroup] Task Assegnato", corpo)
-                st.rerun()
+    if not da_val: 
+        st.info("Nessuna pendenza. Tutti i task sono stati validati.")
+    else:
+        st.write(f"Ci sono {len(da_val)} attività che richiedono il tuo OK:")
+        for v in da_val:
+            with st.container():
+                st.markdown("---")
+                c_tx, c_bt = st.columns([4, 1])
+                # Specifichiamo meglio cosa stiamo approvando
+                info_task = f"📌 **{v.get('assegnato_a')}**: {v.get('descrizione')} \n\n SCADENZA: {v.get('scadenza')} | COMMESSA: {v.get('commessa_ref')}"
+                c_tx.warning(info_task)
+                
+                if c_bt.button("✅ VALIDA MODIFICA", key=f"ok_{v['id']}"):
+                    # Azione 1: Riporta approvato_admin a True
+                    successo = db_update("task", v['id'], {"approvato_admin": True})
+                    
+                    # Azione 2: Notifica il tecnico del nuovo incarico
+                    t_info = next((usr for usr in us if usr['nome'] == v['assegnato_a']), None)
+                    if t_info and t_info.get('email'):
+                        corpo = f"Ciao {v['assegnato_a']},\nIl task '{v['descrizione']}' è stato confermato dall'Admin.\nPuoi procedere con il lavoro."
+                        invia_mail(t_info['email'], "[MasterGroup] Task Confermato", corpo)
+                    
+                    st.success("Task validato correttamente!")
+                    st.rerun()
+
 
