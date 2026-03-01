@@ -9,14 +9,13 @@ from datetime import date, datetime
 # ==========================================
 st.set_page_config(page_title="MasterGroup Cloud", page_icon="🏗️", layout="wide")
 
-# Elenco Task Standard Intoccabile
+# Elenco Attività Standard Blindato
 TASK_STANDARD = [
     "CME (Computo Metrico Estimativo)", "CILA / SCIA / PdC", "DOCFA (Variazione Catastale)", 
     "APE (Attestato Energetico)", "Relazione Legge 10", "Sopralluogo / Rilievo",
     "Contabilità (SAL)", "Sicurezza (PSC / POS)", "Pratica ENEA", "Redazione Elaborati Grafici"
 ]
 
-# CSS per pulizia interfaccia
 st.markdown("""
     <style>
     footer {visibility: hidden;}
@@ -35,7 +34,7 @@ MAIL_USER = st.secrets.get("EMAIL_MITTENTE")
 MAIL_PASS = st.secrets.get("EMAIL_PASSWORD")
 
 if not URL or not KEY:
-    st.error("⚠️ Errore: SUPABASE_URL o SUPABASE_KEY mancanti nei Secrets!")
+    st.error("⚠️ Chiavi SUPABASE mancanti nei Secrets!")
     st.stop()
 
 HEADERS = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
@@ -71,7 +70,7 @@ def get_meteo_bari():
     try:
         res = httpx.get("https://api.open-meteo.com/v1/forecast?latitude=41.11&longitude=16.87&current_weather=true").json()
         temp = res["current_weather"]["temperature"]
-        return f"☀️ Bari: {temp}°C. Ottimo clima per il team MasterGroup!"
+        return f"☀️ Bari: {temp}°C. Buon lavoro al team MasterGroup!"
     except: return "🌤️ MasterGroup Cloud pronto."
 
 # ==========================================
@@ -84,7 +83,7 @@ if "u" not in st.session_state:
         p = st.text_input("Password", type="password")
         if st.form_submit_button("Accedi"):
             utenti = db_get("utenti")
-            user = next((x for x in utenti if str(x.get('email')).lower() == m and str(x.get('password')) == p), None)
+            user = next((x for x in utenti if str(x.get('email', '')).lower() == m and str(x.get('password', '')) == p), None)
             if user:
                 st.session_state.u = user
                 st.rerun()
@@ -95,7 +94,7 @@ u = st.session_state.u
 ruolo, nome_u = u.get('ruolo'), u.get('nome')
 
 # ==========================================
-# [05] SIDEBAR & NAVIGAZIONE
+# [05] SIDEBAR
 # ==========================================
 try: st.sidebar.image("LogoMG.png", use_container_width=True)
 except: st.sidebar.title("MasterGroup")
@@ -108,7 +107,6 @@ if ruolo in ["Admin", "PM"]: menu.extend(["📊 Analisi Commesse", "🎯 Assegna
 if ruolo == "Admin": menu.append("⚖️ Approvazioni")
 
 scelta = st.sidebar.radio("Navigazione", menu, key="main_nav")
-
 if st.sidebar.button("Logout"):
     del st.session_state.u
     st.rerun()
@@ -119,12 +117,12 @@ if st.sidebar.button("Logout"):
 if scelta == "🏠 Dashboard":
     st.header(f"Benvenuto, {nome_u}")
     st.info(get_meteo_bari())
-    tasks = db_get("task")
-    miei = [t for t in tasks if t.get('assegnato_a') == nome_u and t.get('stato') != 'Completato']
+    ts = db_get("task")
+    miei = [t for t in ts if t.get('assegnato_a') == nome_u and t.get('stato') != 'Completato']
     st.metric("I tuoi Task aperti", len(miei))
 
 # ==========================================
-# [07] GESTIONE TASK (OPERATIVITÀ)
+# [07] GESTIONE TASK (OPERATIVITÀ & RIASSEGNAZIONE)
 # ==========================================
 elif scelta == "📋 Gestione Task":
     st.header("Monitoraggio Attività")
@@ -136,7 +134,6 @@ elif scelta == "📋 Gestione Task":
     f_comm = c2.selectbox("Commessa", ["Tutte"] + [cm['codice'] for cm in cs])
     f_stato = c3.selectbox("Stato", ["Tutti", "In corso", "Bloccato", "Completato"])
 
-    # Filtri
     f_t = ts
     if f_nome != "Tutti" and ruolo != "Operatore": f_t = [t for t in f_t if t.get('assegnato_a') == f_nome]
     elif ruolo == "Operatore": f_t = [t for t in f_t if t.get('assegnato_a') == nome_u]
@@ -154,15 +151,36 @@ elif scelta == "📋 Gestione Task":
         
         prefix = "🚨 " if t.get('stato') == 'Bloccato' else ""
         with st.expander(f"{prefix}{label} | {t.get('commessa_ref')} - {t.get('descrizione')}"):
-            st.write(f"Assegnato a: **{t.get('assegnato_a')}**")
-            nuovo_st = st.selectbox("Cambia Stato", ["In corso", "Completato", "Bloccato"], index=["In corso", "Completato", "Bloccato"].index(t.get('stato', 'In corso')), key=f"st_{t['id']}")
+            
+            # SEZIONE ADMIN/PM: Riassegnazione e Modifiche
+            if ruolo in ["Admin", "PM"]:
+                st.subheader("Modifica parametri task")
+                col_te, col_pr, col_sc = st.columns(3)
+                nuovo_tec = col_te.selectbox("Riassegna a", [usr['nome'] for usr in us], index=[usr['nome'] for usr in us].index(t['assegnato_a']), key=f"re_{t['id']}")
+                nuova_prio = col_pr.selectbox("Priorità", ["Bassa", "Media", "Alta"], index=["Bassa", "Media", "Alta"].index(t.get('priorita','Media')), key=f"rp_{t['id']}")
+                nuova_scad = col_sc.date_input("Cambia Scadenza", value=d_scad, key=f"rs_{t['id']}")
+                
+                if st.button("Salva Modifiche", key=f"btn_mod_{t['id']}"):
+                    is_admin = (ruolo == "Admin")
+                    db_update("task", t['id'], {
+                        "assegnato_a": nuovo_tec, 
+                        "priorita": nuova_prio, 
+                        "scadenza": str(nuova_scad),
+                        "approvato_admin": is_admin
+                    })
+                    st.success("Modifica registrata!" if is_admin else "Richiesta inviata all'Admin.")
+                    st.rerun()
+
+            st.divider()
+            # SEZIONE OPERATORE: Stato
+            nuovo_st = st.selectbox("Aggiorna Stato", ["In corso", "Completato", "Bloccato"], index=["In corso", "Completato", "Bloccato"].index(t.get('stato', 'In corso')), key=f"st_{t['id']}")
             nota = st.text_area("Nota blocco", value=t.get('motivo_blocco', ''), key=f"nt_{t['id']}") if nuovo_st == "Bloccato" else ""
-            if st.button("Aggiorna Stato", key=f"btn_{t['id']}"):
+            if st.button("Aggiorna Stato Operativo", key=f"btn_st_{t['id']}"):
                 db_update("task", t['id'], {"stato": nuovo_st, "motivo_blocco": nota})
                 st.rerun()
 
 # ==========================================
-# [08] ANALISI COMMESSE (ICONE RICHIESTE)
+# [08] ANALISI COMMESSE (ICONE)
 # ==========================================
 elif scelta == "📊 Analisi Commesse":
     st.header("Avanzamento Progetti")
@@ -186,34 +204,61 @@ elif scelta == "📊 Analisi Commesse":
                 st.write(f"- **{tc.get('assegnato_a')}**: {tc.get('descrizione')} | Scadenza: {tc['scadenza']} | {status} {blocco}")
 
 # ==========================================
-# [09] ASSEGNAZIONE & APPROVAZIONI
+# [09] ASSEGNAZIONE (TAB RIPRISTINATI)
 # ==========================================
 elif scelta == "🎯 Assegnazione":
-    st.header("Nuovo Task")
-    with st.form("new_t"):
-        c_ref = st.selectbox("Commessa", [c['codice'] for c in db_get("commesse")])
-        tipo = st.selectbox("Attività Standard", TASK_STANDARD)
-        note = st.text_input("Specifica")
-        tecnico = st.selectbox("Tecnico", [u['nome'] for u in db_get("utenti")])
-        scad = st.date_input("Scadenza")
-        if st.form_submit_button("Invia"):
-            payload = {"commessa_ref": c_ref, "descrizione": f"{tipo}: {note}", "assegnato_a": tecnico, "scadenza": str(scad), "stato": "In corso", "approvato_admin": (ruolo == "Admin")}
-            db_insert("task", payload)
-            st.success("Task registrato!")
+    st.header("Gestione Commesse e Task")
+    tab1, tab2 = st.tabs(["🆕 Nuova Commessa", "📝 Nuovo Task"])
+    
+    with tab1:
+        with st.form("f_nuova_comm"):
+            c1, c2 = st.columns(2)
+            nc_cod = c1.text_input("Codice Commessa")
+            nc_cli = c1.text_input("Nome Cliente")
+            ut_all = db_get("utenti")
+            nc_pm = c2.selectbox("PM Responsabile", [u['nome'] for u in ut_all if u['ruolo'] in ['Admin', 'PM']])
+            nc_scad = c2.date_input("Scadenza Commessa")
+            if st.form_submit_button("Crea Progetto"):
+                db_insert("commesse", {"codice": nc_cod, "cliente": nc_cli, "pm_assegnato": nc_pm, "scadenza": str(nc_scad)})
+                st.success("Commessa creata!")
 
+    with tab2:
+        with st.form("f_nuovo_task"):
+            c_list = db_get("commesse")
+            nt_comm = st.selectbox("Seleziona Progetto", [c['codice'] for c in c_list])
+            nt_tipo = st.selectbox("Attività Standard", TASK_STANDARD)
+            nt_note = st.text_input("Specifiche attività")
+            nt_tec = st.selectbox("Assegna a Tecnico", [u['nome'] for u in db_get("utenti")])
+            nt_scad = st.date_input("Data Consegna")
+            if st.form_submit_button("Assegna Task"):
+                payload = {
+                    "commessa_ref": nt_comm, 
+                    "descrizione": f"{nt_tipo}: {nt_note}", 
+                    "assegnato_a": nt_tec, 
+                    "scadenza": str(nt_scad), 
+                    "stato": "In corso", 
+                    "approvato_admin": (ruolo == "Admin")
+                }
+                db_insert("task", payload)
+                st.success("Task registrato!")
+
+# ==========================================
+# [10] APPROVAZIONI
+# ==========================================
 elif scelta == "⚖️ Approvazioni":
-    st.header("Validazione Task PM")
+    st.header("Task e Modifiche da Validare")
     da_val = [t for t in db_get("task") if t.get('approvato_admin') == False]
     us = db_get("utenti")
     if not da_val: st.info("Nessuna pendenza.")
     for v in da_val:
-        col1, col2 = st.columns([4, 1])
-        col1.warning(f"📌 {v.get('assegnato_a')}: {v.get('descrizione')} (Scadenza: {v['scadenza']})")
-        if col2.button("APPROVA", key=f"ok_{v['id']}"):
-            db_update("task", v['id'], {"approvato_admin": True})
-            # Invio Email al Tecnico
-            t_info = next((usr for usr in us if usr['nome'] == v['assegnato_a']), None)
-            if t_info and t_info.get('email'):
-                corpo = f"Ciao {v['assegnato_a']}, il task {v['descrizione']} è stato approvato.\nScadenza: {v['scadenza']}"
-                invia_mail(t_info['email'], "Nuovo Task Approvato - MasterGroup", corpo)
-            st.rerun()
+        with st.container():
+            c_tx, c_bt = st.columns([4, 1])
+            c_tx.warning(f"📌 {v.get('assegnato_a')}: {v.get('descrizione')} su {v.get('commessa_ref')} (Scadenza: {v['scadenza']})")
+            if c_bt.button("✅ APPROVA", key=f"ok_{v['id']}"):
+                db_update("task", v['id'], {"approvato_admin": True})
+                # Invio Mail
+                t_info = next((usr for usr in us if usr['nome'] == v['assegnato_a']), None)
+                if t_info and t_info.get('email'):
+                    corpo = f"Ciao {v['assegnato_a']}, il task {v['descrizione']} è pronto per te.\nScadenza: {v['scadenza']}"
+                    invia_mail(t_info['email'], "[MasterGroup] Task Assegnato", corpo)
+                st.rerun()
