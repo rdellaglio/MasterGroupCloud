@@ -129,10 +129,10 @@ elif scelta == "📋 Gestione Task":
     ts, cs, us = db_get("task"), db_get("commesse"), db_get("utenti")
     oggi = date.today()
 
-    c1, c2, c3 = st.columns(3)
-    f_nome = nome_u if ruolo == "Operatore" else c1.selectbox("Tecnico", ["Tutti"] + [usr['nome'] for usr in us])
-    f_comm = c2.selectbox("Commessa", ["Tutte"] + [cm['codice'] for cm in cs])
-    f_stato = c3.selectbox("Stato", ["Tutti", "In corso", "Bloccato", "Completato"])
+    col1, col2, col3 = st.columns(3)
+    f_nome = nome_u if ruolo == "Operatore" else col1.selectbox("Tecnico", ["Tutti"] + [usr['nome'] for usr in us])
+    f_comm = col2.selectbox("Commessa", ["Tutte"] + [cm['codice'] for cm in cs])
+    f_stato = col3.selectbox("Stato", ["Tutti", "In corso", "Bloccato", "Completato"])
 
     f_t = ts
     if f_nome != "Tutti" and ruolo != "Operatore": f_t = [t for t in f_t if t.get('assegnato_a') == f_nome]
@@ -154,10 +154,11 @@ elif scelta == "📋 Gestione Task":
         prefix = "🚨 " if t.get('stato') == 'Bloccato' else ""
         
         with st.expander(f"{prefix}{label} | {t.get('commessa_ref')} - {t.get('descrizione')}"):
-            # --- SEZIONE MODIFICA (ADMIN/PM) ---
+            # --- SEZIONE MODIFICA (SOLO PER ADMIN E PM) ---
             if ruolo in ["Admin", "PM"]:
                 st.markdown("### 🛠️ Modifica parametri (Richiede approvazione Admin)")
                 c_te, c_pr, c_sc = st.columns(3)
+                
                 lista_nomi = [usr.get('nome') for usr in us]
                 try: idx_tec = lista_nomi.index(t.get('assegnato_a'))
                 except: idx_tec = 0
@@ -174,14 +175,19 @@ elif scelta == "📋 Gestione Task":
                         "scadenza": str(nuova_scad),
                         "approvato_admin": is_admin
                     }
+                    
                     res = db_update("task", t['id'], payload)
+                    
                     if res is not None and res.status_code in [200, 204]:
                         if not is_admin:
-                            st.info("Richiesta inviata all'Admin.")
-                            invia_mail(st.secrets["EMAIL_MITTENTE"], "[MasterGroup] Modifica PM", f"Anna ha modificato il task {t['id']}. Controlla Approvazioni.")
+                            # Notifica Mail all'Admin della richiesta del PM
+                            invia_mail(st.secrets["EMAIL_MITTENTE"], f"[MG] Richiesta Modifica: {t.get('commessa_ref')}", f"Il PM {nome_u} ha richiesto una modifica per il task {t['id']}. Controlla il pannello Approvazioni.")
+                            st.info("Richiesta inviata. Raffaele dovrà approvare la modifica.")
+                        else:
+                            st.success("Modifica approvata istantaneamente.")
                         st.rerun()
                     else:
-                        st.error("Errore nel salvataggio.")
+                        st.error("Errore nel salvataggio. Controlla connessione DB.")
 
             st.divider()
             # --- SEZIONE STATO (PER TUTTI) ---
@@ -261,44 +267,49 @@ elif scelta == "🎯 Assegnazione":
 # [10] APPROVAZIONI
 # ==========================================
 elif scelta == "⚖️ Approvazioni":
-    st.header("Validazione Modifiche e Nuovi Task")
-    
-    # Carichiamo i dati freschi ogni volta
+    st.header("Validazione Task e Modifiche PM")
     tasks_raw = db_get("task")
     utenti_all = db_get("utenti")
     
-    # Filtro super-sicuro: cerca tutto ciò che non ha approvato_admin = True
-    # Gestisce anche i casi in cui il valore è nullo (None)
+    # Filtro: cerchiamo solo i task dove approvato_admin è False
     da_val = [t for t in tasks_raw if t.get('approvato_admin') is False]
     
     if not da_val:
-        st.info("✅ Nessuna attività in attesa. Tutto è stato approvato.")
+        st.info("✅ Nessuna attività in attesa di approvazione.")
     else:
-        st.warning(f"Attenzione: ci sono {len(da_val)} modifiche da convalidare.")
+        st.warning(f"Ci sono {len(da_val)} richieste da gestire.")
         for v in da_val:
             with st.container():
                 st.markdown("---")
                 c_info, c_azione = st.columns([3, 1])
                 
-                testo_task = f"""
-                **Operatore:** {v.get('assegnato_a')}  
-                **Attività:** {v.get('descrizione')}  
-                **Commessa:** {v.get('commessa_ref')}  
-                **Scadenza proposta:** {v.get('scadenza')}
+                info_text = f"""
+                📌 **Operatore:** {v.get('assegnato_a')}  
+                📝 **Attività:** {v.get('descrizione')}  
+                📂 **Commessa:** {v.get('commessa_ref')}  
+                📅 **Scadenza:** {v.get('scadenza')}
                 """
-                c_info.markdown(testo_task)
+                c_info.markdown(info_text)
                 
                 if c_azione.button("✅ APPROVA", key=f"v_ok_{v['id']}"):
-                    # Forza il database a mettere TRUE
+                    # 1. Aggiorna il DB mettendo approvato_admin a True
                     db_update("task", v['id'], {"approvato_admin": True})
                     
-                    # Notifica Email al Tecnico (se presente)
-                    t_mail = next((u.get('email') for u in utenti_all if u.get('nome') == v.get('assegnato_a')), None)
-                    if t_mail:
-                        invia_mail(t_mail, "[MasterGroup] Task Confermato", f"Il task {v.get('descrizione')} è stato approvato dall'Admin.")
+                    # 2. Cerca mail del tecnico nella tabella utenti per notifica
+                    tecnico_nome = v.get('assegnato_a')
+                    tecnico_dati = next((u for u in utenti_all if u.get('nome') == tecnico_nome), None)
                     
-                    st.success("Approvato!")
+                    if tecnico_dati and tecnico_dati.get('email'):
+                        mail_dest = tecnico_dati.get('email')
+                        corpo_mail = f"Ciao {tecnico_nome},\nil task '{v.get('descrizione')}' relativo alla commessa {v.get('commessa_ref')} è stato approvato dall'Admin.\nPuoi visualizzarlo ora nella tua lista task.\n\nBuon lavoro!"
+                        invia_mail(mail_dest, "[MasterGroup] Task Confermato e Assegnato", corpo_mail)
+                        st.success(f"Approvato! Email inviata a {mail_dest}")
+                    else:
+                        st.warning("Approvato, ma email del tecnico non trovata nel database.")
+                    
                     st.rerun()
+
+# Fine del Codice
 
 
 
