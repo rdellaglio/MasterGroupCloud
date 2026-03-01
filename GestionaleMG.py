@@ -152,26 +152,48 @@ elif scelta == "📋 Gestione Task":
         prefix = "🚨 " if t.get('stato') == 'Bloccato' else ""
         with st.expander(f"{prefix}{label} | {t.get('commessa_ref')} - {t.get('descrizione')}"):
             
-            # SEZIONE ADMIN/PM: Riassegnazione e Modifiche
+            # SEZIONE ADMIN/PM: Riassegnazione e Modifiche (Blocco Rev 01.1)
             if ruolo in ["Admin", "PM"]:
                 st.subheader("Modifica parametri task")
                 col_te, col_pr, col_sc = st.columns(3)
-                nuovo_tec = col_te.selectbox("Riassegna a", [usr['nome'] for usr in us], index=[usr['nome'] for usr in us].index(t['assegnato_a']), key=f"re_{t['id']}")
+                
+                # Liste per i menu
+                lista_nomi = [usr.get('nome') for usr in us]
+                idx_tec = lista_nomi.index(t.get('assegnato_a')) if t.get('assegnato_a') in lista_nomi else 0
+                
+                nuovo_tec = col_te.selectbox("Riassegna a", lista_nomi, index=idx_tec, key=f"re_{t['id']}")
                 nuova_prio = col_pr.selectbox("Priorità", ["Bassa", "Media", "Alta"], index=["Bassa", "Media", "Alta"].index(t.get('priorita','Media')), key=f"rp_{t['id']}")
                 nuova_scad = col_sc.date_input("Cambia Scadenza", value=d_scad, key=f"rs_{t['id']}")
                 
-                if st.button("Salva Modifiche", key=f"btn_mod_{t['id']}"):
+                if st.button("Salva e Richiedi Approvazione", key=f"btn_mod_{t['id']}"):
                     is_admin = (ruolo == "Admin")
+                    
+                    # Aggiornamento Database
                     db_update("task", t['id'], {
                         "assegnato_a": nuovo_tec, 
                         "priorita": nuova_prio, 
                         "scadenza": str(nuova_scad),
-                        "approvato_admin": is_admin
+                        "approvato_admin": is_admin  # Se PM, diventa False (va in Approvazioni)
                     })
-                    st.success("Modifica registrata!" if is_admin else "Richiesta inviata all'Admin.")
+                    
+                    # Notifica Email all'Admin se la modifica è di un PM
+                    if not is_admin:
+                        corpo_avviso = f"""
+                        🏗️ RICHIESTA MODIFICA TASK
+                        L'utente {nome_u} (PM) ha modificato un task:
+                        
+                        Task: {t.get('descrizione')}
+                        Nuovo Operatore: {nuovo_tec}
+                        Nuova Scadenza: {nuova_scad}
+                        
+                        Accedi alla sezione 'Approvazioni' per validare.
+                        """
+                        invia_mail(st.secrets["EMAIL_MITTENTE"], f"[MasterGroup] Modifica da approvare - {t.get('commessa_ref')}", corpo_avviso)
+                        st.info("Richiesta inviata all'Admin per validazione.")
+                    else:
+                        st.success("Modifica applicata e confermata.")
+                    
                     st.rerun()
-
-            st.divider()
             # SEZIONE OPERATORE: Stato
             nuovo_st = st.selectbox("Aggiorna Stato", ["In corso", "Completato", "Bloccato"], index=["In corso", "Completato", "Bloccato"].index(t.get('stato', 'In corso')), key=f"st_{t['id']}")
             nota = st.text_area("Nota blocco", value=t.get('motivo_blocco', ''), key=f"nt_{t['id']}") if nuovo_st == "Bloccato" else ""
@@ -262,3 +284,4 @@ elif scelta == "⚖️ Approvazioni":
                     corpo = f"Ciao {v['assegnato_a']}, il task {v['descrizione']} è pronto per te.\nScadenza: {v['scadenza']}"
                     invia_mail(t_info['email'], "[MasterGroup] Task Assegnato", corpo)
                 st.rerun()
+
