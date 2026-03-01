@@ -140,6 +140,8 @@ elif scelta == "📋 Gestione Task":
     if f_comm != "Tutte": f_t = [t for t in f_t if t.get('commessa_ref') == f_comm]
     if f_stato != "Tutti": f_t = [t for t in f_t if t.get('stato') == f_stato]
     
+    f_t.sort(key=lambda x: x.get('scadenza', '9999-12-31'))
+
     for t in f_t:
         try:
             d_scad = datetime.strptime(t['scadenza'], '%Y-%m-%d').date()
@@ -147,11 +149,15 @@ elif scelta == "📋 Gestione Task":
             label = f"⏳ {diff}gg" if diff >= 0 else f"⏰ SCADUTO ({abs(diff)}gg)"
         except: label, d_scad = "📅 Data n.d.", oggi
         
-        with st.expander(f"{label} | {t.get('commessa_ref')} - {t.get('descrizione')}"):
+        prefix = "🚨 " if t.get('stato') == 'Bloccato' else ""
+        
+        with st.expander(f"{prefix}{label} | {t.get('commessa_ref')} - {t.get('descrizione')}"):
             if ruolo in ["Admin", "PM"]:
                 st.subheader("🛠️ Modifica parametri task")
                 l_nomi = [usr.get('nome') for usr in us]
-                nuovo_tec = st.selectbox("Riassegna a", l_nomi, index=l_nomi.index(t['assegnato_a']) if t['assegnato_a'] in l_nomi else 0, key=f"re_{t['id']}")
+                idx_tec = l_nomi.index(t['assegnato_a']) if t['assegnato_a'] in l_nomi else 0
+                
+                nuovo_tec = st.selectbox("Riassegna a", l_nomi, index=idx_tec, key=f"re_{t['id']}")
                 nuova_scad = st.date_input("Nuova Scadenza", value=d_scad, key=f"sc_{t['id']}")
                 
                 if st.button("💾 Invia per Approvazione", key=f"save_{t['id']}"):
@@ -160,30 +166,47 @@ elif scelta == "📋 Gestione Task":
                     if res.status_code in [200, 204]:
                         if not is_admin:
                             st.info("Richiesta inviata a Raffaele.")
-                            invia_mail(st.secrets["EMAIL_MITTENTE"], "[MG] Richiesta Modifica", f"Anna ha modificato il task {t['id']}. Controlla Approvazioni.")
+                            invia_mail(st.secrets["EMAIL_MITTENTE"], "[MG] Richiesta Modifica", f"L'utente {nome_u} ha richiesto una modifica per il task {t['id']}.")
                         else: st.success("Modifica confermata.")
                         st.rerun()
 
             st.divider()
             st.subheader("📈 Stato Avanzamento")
-            nuovo_st = st.selectbox("Cambia Stato", ["In corso", "Completato", "Bloccato"], index=["In corso", "Completato", "Bloccato"].index(t.get('stato', 'In corso')), key=f"st_{t['id']}")
+            stati_validi = ["In corso", "Completato", "Bloccato"]
+            # Fix per evitare il ValueError: se lo stato non è nella lista, usa "In corso" (indice 0)
+            stato_attuale = t.get('stato', 'In corso')
+            idx_stato = stati_validi.index(stato_attuale) if stato_attuale in stati_validi else 0
+            
+            nuovo_st = st.selectbox("Cambia Stato", stati_validi, index=idx_stato, key=f"st_{t['id']}")
             if st.button("Aggiorna Stato", key=f"up_{t['id']}"):
                 db_update("task", t['id'], {"stato": nuovo_st})
                 st.rerun()
 
 # ==========================================
-# [08] ANALISI COMMESSE
+# [08] ANALISI COMMESSE (ICONE RIPRISTINATE)
 # ==========================================
 elif scelta == "📊 Analisi Commesse":
     st.header("Avanzamento Progetti")
     cs, ts, oggi = db_get("commesse"), db_get("task"), date.today()
     for c in cs:
         t_comm = [t for t in ts if t.get('commessa_ref') == c.get('codice')]
-        perc = (len([t for t in t_comm if t['stato'] == 'Completato']) / len(t_comm) * 100) if t_comm else 0
+        chiusi = len([t for t in t_comm if t['stato'] == 'Completato'])
+        perc = (chiusi / len(t_comm) * 100) if t_comm else 0
+        
         with st.expander(f"📂 {c['codice']} - {c['cliente']} ({int(perc)}%)"):
             st.progress(perc / 100)
             for tc in t_comm:
-                st.write(f"- {tc.get('assegnato_a')}: {tc.get('descrizione')} | {tc.get('stato')}")
+                try:
+                    d_s = datetime.strptime(tc['scadenza'], '%Y-%m-%d').date()
+                    diff = (d_s - oggi).days
+                    if tc['stato'] == 'Completato': icona = "✅ COMPLETATO"
+                    elif diff < 0: icona = f"⏰ RITARDO ({abs(diff)} gg)"
+                    elif diff <= 2: icona = f"⏳ IN SCADENZA ({diff} gg)"
+                    else: icona = f"🟢 OK ({diff} gg)"
+                except: icona = "📅 N.D."
+                
+                blocco = "🛑 BLOCCATO!" if tc.get('stato') == 'Bloccato' else ""
+                st.write(f"- **{tc.get('assegnato_a')}**: {tc.get('descrizione')} | {icona} {blocco}")
 
 # ==========================================
 # [09] ASSEGNAZIONE
@@ -201,7 +224,7 @@ elif scelta == "🎯 Assegnazione":
     with tab2:
         with st.form("f_t"):
             t_comm = st.selectbox("Commessa", [c['codice'] for c in db_get("commesse")])
-            t_desc = st.text_input("Descrizione")
+            t_desc = st.selectbox("Attività Standard", TASK_STANDARD) # Ripristino elenco standard
             t_tec = st.selectbox("Tecnico", [u['nome'] for u in db_get("utenti")])
             t_scad = st.date_input("Scadenza")
             if st.form_submit_button("Crea Task"):
@@ -209,7 +232,7 @@ elif scelta == "🎯 Assegnazione":
                 st.success("Task inviato!")
 
 # ==========================================
-# [10] APPROVAZIONI & INVIO EMAIL FINALE
+# [10] APPROVAZIONI & INVIO EMAIL
 # ==========================================
 elif scelta == "⚖️ Approvazioni":
     st.header("Validazione Modifiche")
@@ -224,13 +247,10 @@ elif scelta == "⚖️ Approvazioni":
             with st.container():
                 st.warning(f"📌 {v['assegnato_a']}: {v['descrizione']} ({v['commessa_ref']})")
                 if st.button("✅ APPROVA E NOTIFICA", key=f"ok_{v['id']}"):
-                    # 1. Conferma nel DB
                     db_update("task", v['id'], {"approvato_admin": True})
-                    
-                    # 2. Cerca email del tecnico per invio notifica
                     tec_info = next((u for u in u_all if u.get('nome') == v.get('assegnato_a')), None)
                     if tec_info and tec_info.get('email'):
-                        invia_mail(tec_info['email'], "[MasterGroup] Task Confermato", f"Il task {v['descrizione']} è stato approvato. Puoi iniziare!")
+                        invia_mail(tec_info['email'], "[MasterGroup] Task Confermato", f"Il task {v['descrizione']} è stato approvato dall'Admin.")
                         st.success(f"Approvato! Email inviata a {tec_info['email']}")
                     else:
                         st.warning("Approvato, ma email tecnico non trovata.")
