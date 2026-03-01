@@ -237,12 +237,18 @@ elif scelta == "📊 Analisi Commesse":
                 st.write(f"- {tc.get('assegnato_a')}: {tc.get('descrizione')} [{tc.get('stato')}]")
 
 # ==========================================
-# [08] ASSEGNAZIONE (REV 01.10 - CAMPI REALI)
+# [08] ASSEGNAZIONE (REV 01.11 - CON MEMORIA)
 # ==========================================
 elif scelta == "🎯 Assegnazione":
     st.header("Pianificazione Nuove Attività")
     ts, cs, us = db_get("task"), db_get("commesse"), db_get("utenti")
     
+    # Inizializzazione Memoria (Session State) se vuota
+    if "last_comm" not in st.session_state: st.session_state.last_comm = None
+    if "last_tec" not in st.session_state: st.session_state.last_tec = None
+    if "last_desc" not in st.session_state: st.session_state.last_desc = None
+    if "last_date" not in st.session_state: st.session_state.last_date = date.today()
+
     tab1, tab2 = st.tabs(["🆕 Nuova Commessa", "📝 Nuovo Task"])
     
     # --- TAB 1: CREAZIONE COMMESSA ---
@@ -252,71 +258,63 @@ elif scelta == "🎯 Assegnazione":
             c1, c2 = st.columns(2)
             cod_c = c1.text_input("Codice Commessa")
             cli_c = c2.text_input("Cliente")
-            
             c3, c4 = st.columns(2)
             bud_c = c3.number_input("Budget Previsto (€)", min_value=0.0, step=500.0)
             scad_c = c4.date_input("Scadenza Globale Commessa", value=date.today())
             
             if st.form_submit_button("Crea Commessa"):
                 if cod_c and cli_c:
-                    payload_c = {
-                        "codice": cod_c, 
-                        "cliente": cli_c, 
-                        "budget": bud_c, 
-                        "scadenza": str(scad_c) # Nome campo corretto: scadenza
-                    }
-                    res_c = db_insert("commesse", payload_c)
-                    if res_c.status_code in [200, 201]:
-                        st.success(f"✅ Commessa {cod_c} creata!")
-                        st.rerun()
-                    else:
-                        st.error(f"Errore DB: {res_c.status_code}")
-                else:
-                    st.warning("Compila i campi obbligatori.")
+                    res_c = db_insert("commesse", {"codice": cod_c, "cliente": cli_c, "budget": bud_c, "scadenza": str(scad_c)})
+                    if res_c.status_code in [200, 201]: 
+                        st.success(f"✅ Commessa {cod_c} creata!"); st.rerun()
+                else: st.warning("Compila i campi obbligatori.")
 
-    # --- TAB 2: CREAZIONE TASK ---
+    # --- TAB 2: CREAZIONE TASK (CON MEMORIA) ---
     with tab2:
         if not cs:
             st.warning("⚠️ Crea prima una commessa.")
         else:
-            with st.form("form_nuovo_task", clear_on_submit=True):
+            with st.form("form_nuovo_task"):
                 st.subheader("Dettaglio Attività")
                 
-                # Mappa delle scadenze delle commesse
-                map_scadenze = {c['codice']: c.get('scadenza') for c in cs}
-                t_comm_ref = st.selectbox("Seleziona Commessa", list(map_scadenze.keys()))
+                # Liste per indici
+                l_comms = [c['codice'] for c in cs]
+                l_tecnici = [usr.get('nome') for usr in us]
                 
-                t_desc = st.selectbox("Tipo Attività", TASK_STANDARD)
-                t_tec = st.selectbox("Assegna Tecnico", [usr.get('nome') for usr in us])
-                t_scad_task = st.date_input("Data Scadenza Task", value=date.today())
+                # Recupero Indici dalla memoria
+                idx_c = l_comms.index(st.session_state.last_comm) if st.session_state.last_comm in l_comms else 0
+                idx_t = l_tecnici.index(st.session_state.last_tec) if st.session_state.last_tec in l_tecnici else 0
+                idx_d = TASK_STANDARD.index(st.session_state.last_desc) if st.session_state.last_desc in TASK_STANDARD else 0
+
+                t_comm_ref = st.selectbox("Seleziona Commessa", l_comms, index=idx_c)
+                t_desc = st.selectbox("Tipo Attività", TASK_STANDARD, index=idx_d)
+                t_tec = st.selectbox("Assegna Tecnico", l_tecnici, index=idx_t)
+                t_scad_task = st.date_input("Data Scadenza Task", value=st.session_state.last_date)
                 
-                if st.form_submit_button("Assegna Task"):
-                    # CONTROLLO ALERT SCADENZA
-                    scad_max_str = map_scadenze.get(t_comm_ref)
+                if st.form_submit_button("Invia Task"):
+                    # Salvataggio in memoria per il prossimo task
+                    st.session_state.last_comm = t_comm_ref
+                    st.session_state.last_tec = t_tec
+                    st.session_state.last_desc = t_desc
+                    st.session_state.last_date = t_scad_task
+
+                    # Controllo Alert Scadenza
+                    scad_max_str = next((c['scadenza'] for c in cs if c['codice'] == t_comm_ref), None)
                     alert_mostra = False
-                    
                     if scad_max_str:
                         try:
-                            scad_max = date.fromisoformat(scad_max_str)
-                            if t_scad_task > scad_max:
-                                alert_mostra = True
+                            if t_scad_task > date.fromisoformat(scad_max_str): alert_mostra = True
                         except: pass
                     
-                    payload_t = {
-                        "commessa_ref": t_comm_ref,
-                        "descrizione": t_desc,
-                        "assegnato_a": t_tec,
-                        "scadenza": str(t_scad_task),
-                        "stato": "In corso"
-                    }
+                    # Inserimento
+                    res_t = db_insert("task", {"commessa_ref": t_comm_ref, "descrizione": t_desc, "assegnato_a": t_tec, "scadenza": str(t_scad_task), "stato": "In corso"})
                     
-                    res_t = db_insert("task", payload_t)
                     if res_t.status_code in [200, 201]:
                         if alert_mostra:
-                            st.warning(f"⚠️ Task creato, ma la data ({t_scad_task}) supera la fine commessa ({scad_max_str})!")
+                            st.warning(f"⚠️ Task creato, ma supera la fine commessa ({scad_max_str})!")
                         else:
                             st.success(f"✅ Task assegnato a {t_tec}!")
+                        st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
-
 
