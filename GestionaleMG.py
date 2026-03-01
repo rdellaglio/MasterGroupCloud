@@ -142,27 +142,23 @@ elif scelta == "📋 Gestione Task":
     
     f_t.sort(key=lambda x: x.get('scadenza', '9999-12-31'))
 
-for t in f_t:
+    for t in f_t:
         try:
             d_scad = datetime.strptime(t['scadenza'], '%Y-%m-%d').date()
             diff = (d_scad - oggi).days
             label = f"⏳ {diff}gg" if diff >= 0 else f"⏰ SCADUTO ({abs(diff)}gg)"
         except: 
             label = "📅 Data n.d."
-            d_scad = oggi # fallback per evitare crash
+            d_scad = oggi
         
         prefix = "🚨 " if t.get('stato') == 'Bloccato' else ""
         
-        # QUI INIZIA LA SEZIONE CHE CERCAVI
         with st.expander(f"{prefix}{label} | {t.get('commessa_ref')} - {t.get('descrizione')}"):
-            
-            # --- SEZIONE MODIFICA (SOLO PER ADMIN E PM) ---
+            # --- SEZIONE MODIFICA (ADMIN/PM) ---
             if ruolo in ["Admin", "PM"]:
                 st.markdown("### 🛠️ Modifica parametri (Richiede approvazione Admin)")
                 c_te, c_pr, c_sc = st.columns(3)
-                
                 lista_nomi = [usr.get('nome') for usr in us]
-                # Evitiamo crash se il nome non è in lista
                 try: idx_tec = lista_nomi.index(t.get('assegnato_a'))
                 except: idx_tec = 0
                 
@@ -176,27 +172,27 @@ for t in f_t:
                         "assegnato_a": nuovo_tec, 
                         "priorita": nuova_prio, 
                         "scadenza": str(nuova_scad),
-                        "approvato_admin": is_admin # Se PM salva, questo diventa FALSE
+                        "approvato_admin": is_admin
                     }
-                    
-                    # Invio al Database
                     res = db_update("task", t['id'], payload)
-                    
                     if res is not None and res.status_code in [200, 204]:
                         if not is_admin:
-                            st.info("Richiesta inviata. Raffaele dovrà approvare la modifica.")
-                            # Notifica Mail a te (Admin)
+                            st.info("Richiesta inviata all'Admin.")
                             invia_mail(st.secrets["EMAIL_MITTENTE"], "[MasterGroup] Modifica PM", f"Anna ha modificato il task {t['id']}. Controlla Approvazioni.")
-                        else:
-                            st.success("Modifica approvata istantaneamente.")
                         st.rerun()
                     else:
-                        st.error("Errore nel salvataggio. Controlla la colonna 'approvato_admin' su Supabase.")
+                        st.error("Errore nel salvataggio.")
 
             st.divider()
             # --- SEZIONE STATO (PER TUTTI) ---
             st.markdown("### 📈 Stato Avanzamento")
-            # ... (continua con la selectbox dello stato come prima)
+            lista_stati = ["In corso", "Completato", "Bloccato"]
+            idx_st = lista_stati.index(t.get('stato', 'In corso')) if t.get('stato') in lista_stati else 0
+            nuovo_st = st.selectbox("Stato", lista_stati, index=idx_st, key=f"st_{t['id']}")
+            nota = st.text_area("Nota blocco", value=t.get('motivo_blocco', ''), key=f"nt_{t['id']}") if nuovo_st == "Bloccato" else ""
+            if st.button("Aggiorna Stato", key=f"btn_st_{t['id']}"):
+                db_update("task", t['id'], {"stato": nuovo_st, "motivo_blocco": nota})
+                st.rerun()
 
 # ==========================================
 # [08] ANALISI COMMESSE (ICONE)
@@ -303,6 +299,7 @@ elif scelta == "⚖️ Approvazioni":
                     
                     st.success("Approvato!")
                     st.rerun()
+
 
 
 
