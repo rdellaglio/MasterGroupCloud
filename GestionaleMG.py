@@ -235,23 +235,59 @@ elif scelta == "🎯 Assegnazione":
 # [10] APPROVAZIONI & INVIO EMAIL
 # ==========================================
 elif scelta == "⚖️ Approvazioni":
-    st.header("Validazione Modifiche")
+    st.header("⚖️ Validazione Modifiche e Task")
+    
+    # Recupero dati freschi
     t_raw = db_get("task")
     u_all = db_get("utenti")
-    da_val = [t for t in t_raw if t.get('approvato_admin') == False]
+    
+    # DEBUG: Mostriamo all'Admin quanti task totali ci sono (solo per test)
+    # st.write(f"Task totali nel sistema: {len(t_raw)}") 
+
+    # FILTRO POTENZIATO: Prende tutto ciò che NON è True (quindi False, None, o vuoto)
+    da_val = [t for t in t_raw if t.get('approvato_admin') is not True]
     
     if not da_val:
-        st.info("Nessuna attività in attesa.")
+        st.info("✅ Ottimo lavoro, Raffaele! Nessuna attività in attesa di approvazione.")
     else:
+        st.warning(f"Attenzione: ci sono {len(da_val)} richieste che attendono il tuo OK.")
+        
         for v in da_val:
             with st.container():
-                st.warning(f"📌 {v['assegnato_a']}: {v['descrizione']} ({v['commessa_ref']})")
-                if st.button("✅ APPROVA E NOTIFICA", key=f"ok_{v['id']}"):
-                    db_update("task", v['id'], {"approvato_admin": True})
-                    tec_info = next((u for u in u_all if u.get('nome') == v.get('assegnato_a')), None)
-                    if tec_info and tec_info.get('email'):
-                        invia_mail(tec_info['email'], "[MasterGroup] Task Confermato", f"Il task {v['descrizione']} è stato approvato dall'Admin.")
-                        st.success(f"Approvato! Email inviata a {tec_info['email']}")
+                st.markdown("---")
+                c_testo, c_tasto = st.columns([3, 1])
+                
+                # Info dettagliate per l'Admin
+                testo_dettaglio = f"""
+                👤 **Tecnico:** {v.get('assegnato_a', 'Non assegnato')}  
+                📋 **Attività:** {v.get('descrizione', 'Senza descrizione')}  
+                📂 **Commessa:** {v.get('commessa_ref', 'N.D.')}  
+                📅 **Scadenza:** {v.get('scadenza', 'N.D.')}
+                """
+                c_testo.markdown(testo_dettaglio)
+                
+                # Pulsante di approvazione
+                if c_tasto.button("✅ APPROVA E NOTIFICA", key=f"btn_app_{v['id']}"):
+                    # 1. Scriviamo True nel database
+                    aggiornamento = db_update("task", v['id'], {"approvato_admin": True})
+                    
+                    if aggiornamento.status_code in [200, 204]:
+                        # 2. Gestione Email al Tecnico
+                        nome_tec = v.get('assegnato_a')
+                        dati_tec = next((u for u in u_all if u.get('nome') == nome_tec), None)
+                        
+                        if dati_tec and dati_tec.get('email'):
+                            mail_dest = dati_tec.get('email')
+                            corpo = f"Ciao {nome_tec},\nil task '{v.get('descrizione')}' è stato appena approvato dall'Admin.\nPuoi iniziare a lavorarci ora!"
+                            invia_mail(mail_dest, "[MasterGroup] Task Confermato", corpo)
+                            st.success(f"Task approvato! Email inviata a {mail_dest}")
+                        else:
+                            st.warning("Approvato, ma il tecnico non ha un'email registrata.")
+                        
+                        st.rerun()
                     else:
-                        st.warning("Approvato, ma email tecnico non trovata.")
-                    st.rerun()
+                        st.error("Errore di connessione al database durante l'approvazione.")
+
+# ==========================================
+# FINE DEL CODICE
+# ==========================================
