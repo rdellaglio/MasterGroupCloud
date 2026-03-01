@@ -143,7 +143,7 @@ elif scelta == "📋 Gestione Task":
     f_t.sort(key=lambda x: x.get('scadenza', '9999-12-31'))
 
     # BLOCCO DIAGNOSTICO REV 01.2
-            if ruolo in ["Admin", "PM"]:
+        if ruolo in ["Admin", "PM"]:
                 st.subheader("Modifica parametri task")
                 col_te, col_pr, col_sc = st.columns(3)
                 lista_nomi = [usr.get('nome') for usr in us]
@@ -286,6 +286,7 @@ elif scelta == "⚖️ Approvazioni":
                     
                     st.success("Approvato!")
                     st.rerun()
+
 
 
 
