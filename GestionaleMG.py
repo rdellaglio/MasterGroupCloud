@@ -8,7 +8,59 @@ from datetime import date, datetime
 # [01] CONFIGURAZIONE & BRANDING
 # ==========================================
 st.set_page_config(page_title="MasterGroup Cloud", page_icon="🏗️", layout="wide")
-
+# --- [01.A] STILE GRAFICO MASTERGROUP ---
+st.markdown("""
+    <style>
+    /* 1. Sfondo generale e Font */
+    [data-testid="stAppViewContainer"] {
+        background-color: #fcfcfc;
+    }
+    
+    /* 2. Titoli Blu MasterGroup */
+    h1, h2, h3 { 
+        color: #003366 !important; 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-weight: 700;
+    }
+    
+    /* 3. Sidebar (Barra Laterale) più elegante */
+    [data-testid="stSidebar"] {
+        background-color: #f0f2f6;
+        border-right: 2px solid #003366;
+    }
+    
+    /* 4. Pulsanti arrotondati e professionali */
+    .stButton>button {
+        width: 100%;
+        border-radius: 20px;
+        border: 2px solid #003366;
+        color: #003366;
+        background-color: white;
+        font-weight: bold;
+        padding: 0.5rem;
+    }
+    .stButton>button:hover {
+        background-color: #003366;
+        color: white;
+        border: 2px solid #003366;
+    }
+    
+    /* 5. Contenitori Task (Expander) */
+    .streamlit-expanderHeader {
+        background-color: white !important;
+        border: 1px solid #e0e0e0 !important;
+        border-radius: 12px !important;
+        padding: 10px !important;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+    }
+    
+    /* 6. Tabelle e Metriche */
+    [data-testid="stMetricValue"] {
+        color: #003366;
+        font-size: 1.8rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
 TASK_STANDARD = [
     "--- 1. AMMINISTRAZIONE ---",
     "Contratto e Incarico Professionale",
@@ -362,6 +414,7 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
+
 
 
 
