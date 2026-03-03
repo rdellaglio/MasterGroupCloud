@@ -156,6 +156,34 @@ def calcola_stato_commessa(task_commessa):
         return "Bloccato"
     return "Aperto"
 
+def icona_stato_commessa(stato):
+    mapping = {
+        "Aperto": "🟢",
+        "Bloccato": "🚨",
+        "Concluso": "✅"
+    }
+    return mapping.get(stato, "📂")
+
+def icona_stato_task(stato):
+    mapping = {
+        "In corso": "🟡",
+        "Bloccato": "🚨",
+        "Completato": "✅"
+    }
+    return mapping.get(stato, "❓")
+
+def etichetta_scadenza(task, oggi):
+    try:
+        d_scad = date.fromisoformat(task.get('scadenza'))
+        diff = (d_scad - oggi).days
+        if diff < 0:
+            return f"⏰ Scaduto da {abs(diff)}gg"
+        if diff <= 3:
+            return f"⏳ In scadenza tra {diff}gg"
+        return f"📅 Scade tra {diff}gg"
+    except:
+        return "❓ Scadenza non definita"
+
 def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     commesse = commesse_cache if commesse_cache is not None else db_get("commesse")
     tasks = task_cache if task_cache is not None else db_get("task")
@@ -364,6 +392,7 @@ elif scelta == "📋 Gestione Task":
 elif scelta == "📊 Analisi Commesse":
     st.header("Avanzamento Progetti")
     cs, ts = db_get("commesse"), db_get("task")
+    oggi = date.today()
 
     filtro_stato = st.selectbox("Filtra stato commessa", ["Tutti", "Aperto", "Bloccato", "Concluso"], index=0)
     if filtro_stato != "Tutti":
@@ -383,13 +412,20 @@ elif scelta == "📊 Analisi Commesse":
 
         chiusi = len([t for t in t_comm if t['stato'] == 'Completato'])
         perc = (chiusi / len(t_comm) * 100) if t_comm else 0
-        with st.expander(f"📂 {c['codice']} - {c['cliente']} | Stato: {stato_commessa} ({int(perc)}%)"):
+        icona_commessa = icona_stato_commessa(stato_commessa)
+        with st.expander(f"{icona_commessa} {c['codice']} - {c['cliente']} | Stato: {stato_commessa} ({int(perc)}%)"):
             if ruolo == "Admin":
                 st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
-            st.write(f"📌 Stato commessa: **{stato_commessa}**")
+            st.write(f"📌 Stato commessa: **{icona_commessa} {stato_commessa}**")
             st.progress(perc / 100)
             for tc in t_comm:
-                st.write(f"- {tc.get('assegnato_a')}: {tc.get('descrizione')} [{tc.get('stato')}]")
+                stato_task = tc.get('stato')
+                icona_task = icona_stato_task(stato_task)
+                scadenza_task = etichetta_scadenza(tc, oggi)
+                st.write(
+                    f"- **{tc.get('assegnato_a')}**: {tc.get('descrizione')} "
+                    f"[{icona_task} {stato_task}] · {scadenza_task}"
+                )
 
 # ==========================================
 # [08] ASSEGNAZIONE (REV 01.11 - CON MEMORIA)
@@ -490,7 +526,6 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
-
 
 
 
