@@ -5,6 +5,7 @@ import os
 import json
 import secrets
 import string
+import re
 from email.mime.text import MIMEText
 from datetime import date, datetime
 from urllib.parse import urlencode
@@ -243,6 +244,27 @@ def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     nuovo_stato = calcola_stato_commessa(task_commessa)
     if commessa.get("stato") != nuovo_stato:
         db_update("commesse", commessa["id"], {"stato": nuovo_stato})
+
+
+def chiave_ordinamento_commessa_desc(commessa):
+    """
+    Chiave ordinamento per commesse: prima data/ora più recente,
+    fallback su prefisso numerico del codice commessa.
+    """
+    for campo_data in ["created_at", "timestamp", "data_creazione", "updated_at"]:
+        valore = commessa.get(campo_data)
+        if not valore:
+            continue
+        try:
+            return datetime.fromisoformat(str(valore).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            continue
+
+    codice = str(commessa.get("codice") or "")
+    m = re.match(r"\s*(\d+)", codice)
+    if m:
+        return int(m.group(1))
+    return 0
 
 def periodo_giornata(adesso=None):
     now = adesso or datetime.now()
@@ -870,4 +892,3 @@ elif scelta == "👥 Gestione Utenti":
 
     if "pwd_temp_admin" not in st.session_state:
         st.session_state.pwd_temp_admin = genera_password_temporanea()
-
