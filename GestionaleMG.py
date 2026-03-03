@@ -130,6 +130,7 @@ SMTP_USER = _safe_secret("SMTP_USER")
 SMTP_PASSWORD = _safe_secret("SMTP_PASSWORD")
 SMTP_FROM = _safe_secret("SMTP_FROM") or SMTP_USER
 SMTP_USE_TLS = str(_safe_secret("SMTP_USE_TLS") or "true").lower() in ["1", "true", "yes", "on"]
+NOTIFY_ADMIN_EMAIL = _safe_secret("NOTIFY_ADMIN_EMAIL")
 
 class DbResult:
     def __init__(self, status_code=503, payload=None, text=""):
@@ -246,6 +247,27 @@ def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     nuovo_stato = calcola_stato_commessa(task_commessa)
     if commessa.get("stato") != nuovo_stato:
         db_update("commesse", commessa["id"], {"stato": nuovo_stato})
+
+
+def chiave_ordinamento_commessa_desc(commessa):
+    """
+    Chiave ordinamento per commesse: prima data/ora più recente,
+    fallback su prefisso numerico del codice commessa.
+    """
+    for campo_data in ["created_at", "timestamp", "data_creazione", "updated_at"]:
+        valore = commessa.get(campo_data)
+        if not valore:
+            continue
+        try:
+            return datetime.fromisoformat(str(valore).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            continue
+
+    codice = str(commessa.get("codice") or "")
+    m = re.match(r"\s*(\d+)", codice)
+    if m:
+        return int(m.group(1))
+    return 0
 
 def periodo_giornata(adesso=None):
     now = adesso or datetime.now()
@@ -371,16 +393,21 @@ def invia_mail_blocco(destinatari, oggetto, corpo):
 def notifica_blocco_task(task, commesse, utenti, motivazione):
     commessa = next((c for c in commesse if c.get("codice") == task.get("commessa_ref")), None)
     pm_nome = commessa.get("pm_assegnato") if commessa else None
+    pm_email = None
 
     admin_users = [u for u in utenti if str(u.get("ruolo", "")).strip().lower() == "admin"]
     destinatari = set()
     if pm_nome:
         pm_user = next((u for u in utenti if u.get("nome") == pm_nome), None)
         if pm_user and pm_user.get("email"):
-            destinatari.add(pm_user.get("email"))
+            pm_email = pm_user.get("email")
+            destinatari.add(pm_email)
+    admin_emails = []
     for adm in admin_users:
         if adm.get("email"):
-            destinatari.add(adm.get("email"))
+            email = adm.get("email")
+            admin_emails.append(email)
+            destinatari.add(email)
 
     # Formato oggetto richiesto: nome commessa - Attività in Blocco - nome tecnico
     nome_commessa = task.get("commessa_ref") or (commessa.get("cliente") if commessa else "N/D")
@@ -394,7 +421,12 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
         "motivazione": motivazione,
     }
     corpo = genera_testo_mail_blocco_ai(evento)
-    return invia_mail_blocco(sorted(destinatari), oggetto, corpo)
+    ok, msg = invia_mail_blocco(sorted(destinatari), oggetto, corpo)
+    if ok:
+        admin_email = ", ".join(sorted(set(admin_emails))) if admin_emails else None
+        dettaglio = f" Destinatari: PM={pm_email or 'N/D'}, Admin={admin_email or 'N/D'}."
+        return True, msg + dettaglio
+    return False, msg
 
 
 def routine_invio_mail_blocco(prev_stato, nuovo_stato, task, commesse, utenti, motivazione_blocco):

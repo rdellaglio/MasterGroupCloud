@@ -167,3 +167,18 @@ Se il task è già `Bloccato` e viene salvato di nuovo, l'app evita invii duplic
 - È disponibile la ricerca per **codice**, **cliente** e **PM**.
 - Il PM incaricato è visibile direttamente nella card/expander commessa.
 - Ordinamento di default: commesse più recenti prima (se esiste un timestamp `created_at` o equivalente), altrimenti ordinamento per prefisso numerico del codice commessa in ordine decrescente.
+
+
+## Struttura contenuto email blocco
+La mail contiene sempre un riepilogo schematico iniziale:
+- Task
+- Tecnico
+- PM incaricato
+- Data/Ora
+- Motivazione
+
+Segue una sezione **Indicazioni operative** generata dall'AI, contestualizzata per il PM responsabile della commessa.
+
+## Destinatari notifica blocco
+- 1 solo PM: quello assegnato nella commessa (`pm_assegnato`)
+- 1 solo Admin: `NOTIFY_ADMIN_EMAIL` se valorizzata, altrimenti primo Admin disponibile
