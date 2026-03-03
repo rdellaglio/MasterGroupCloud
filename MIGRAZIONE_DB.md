@@ -71,6 +71,37 @@ FROM information_schema.columns
 WHERE table_name = 'task' AND column_name = 'motivazione_blocco';
 ```
 
+## Migrazione utenti: campo interno/esterno
+Per abilitare la classificazione utenti **Interno/Esterno** (usata nel nuovo tool Admin), esegui:
+
+1. Apri Supabase → **SQL Editor**.
+2. Crea una nuova query.
+3. Incolla il contenuto di `db_migrazione_utenti_interno_esterno.sql`.
+4. Esegui la query.
+
+Verifica rapida:
+
+```sql
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'utenti' AND column_name = 'interno_esterno';
+```
+
+e:
+
+```sql
+SELECT interno_esterno, COUNT(*)
+FROM utenti
+GROUP BY interno_esterno
+ORDER BY interno_esterno;
+```
+
+Atteso:
+- colonna `interno_esterno` presente su `utenti`;
+- `NOT NULL`;
+- default `Interno`;
+- valori ammessi solo `Interno`/`Esterno`.
+
 ## Configurazione manuale notifiche email
 Aggiungi in `.streamlit/secrets.toml` (o variabili ambiente) i seguenti parametri:
 
