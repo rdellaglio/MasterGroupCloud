@@ -1,6 +1,7 @@
 import streamlit as st
 import httpx
 import smtplib
+import os
 from email.mime.text import MIMEText
 from datetime import date, datetime
 # REV 01.05
@@ -99,27 +100,82 @@ TASK_STANDARD = [
 # ==========================================
 # [02] CONNESSIONE DATABASE (DATI DIRETTI)
 # ==========================================
-URL = st.secrets.get("SUPABASE_URL")
-KEY = st.secrets.get("SUPABASE_KEY")
-HEADERS = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
+def _safe_secret(key):
+    try:
+        return st.secrets.get(key)
+    except Exception:
+        return os.getenv(key)
+
+URL = _safe_secret("SUPABASE_URL")
+KEY = _safe_secret("SUPABASE_KEY")
+DB_READY = bool(URL and KEY)
+HEADERS = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"} if DB_READY else {}
+
+class DbResult:
+    def __init__(self, status_code=503, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        return self._payload
 
 def db_get(tabella):
+    if not DB_READY:
+        return []
     try:
         res = httpx.get(f"{URL}/rest/v1/{tabella}?select=*", headers=HEADERS, timeout=10)
         return res.json() if res.status_code == 200 else []
-    except: return []
+    except:
+        return []
 
 def db_update(tabella, id_riga, payload):
-    return httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload)
+    if not DB_READY:
+        return DbResult(text="DB non configurato. Imposta SUPABASE_URL e SUPABASE_KEY in secrets.toml.")
+    try:
+        return httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload, timeout=10)
+    except Exception as e:
+        return DbResult(text=f"Errore update DB: {e}")
 
 def db_insert(tabella, payload):
-    return httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload)
+    if not DB_READY:
+        return DbResult(text="DB non configurato. Imposta SUPABASE_URL e SUPABASE_KEY in secrets.toml.")
+    try:
+        return httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload, timeout=10)
+    except Exception as e:
+        return DbResult(text=f"Errore insert DB: {e}")
+
+def calcola_stato_commessa(task_commessa):
+    if not task_commessa:
+        return "Aperto"
+
+    stati_task = [t.get("stato") for t in task_commessa]
+    if all(s == "Completato" for s in stati_task):
+        return "Concluso"
+    if any(s == "Bloccato" for s in stati_task):
+        return "Bloccato"
+    return "Aperto"
+
+def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
+    commesse = commesse_cache if commesse_cache is not None else db_get("commesse")
+    tasks = task_cache if task_cache is not None else db_get("task")
+
+    commessa = next((c for c in commesse if c.get("codice") == codice_commessa), None)
+    if not commessa or "id" not in commessa:
+        return
+
+    task_commessa = [t for t in tasks if t.get("commessa_ref") == codice_commessa]
+    nuovo_stato = calcola_stato_commessa(task_commessa)
+    if commessa.get("stato") != nuovo_stato:
+        db_update("commesse", commessa["id"], {"stato": nuovo_stato})
 
 # ==========================================
 # [03] ACCESSO (LOGIN)
 # ==========================================
 if "u" not in st.session_state:
     st.title("🏗️ MasterGroup Cloud")
+    if not DB_READY:
+        st.warning("⚠️ Configurazione DB mancante: aggiungi SUPABASE_URL e SUPABASE_KEY in `.streamlit/secrets.toml` per usare login e dati reali.")
     with st.form("login"):
         m = st.text_input("Email").strip().lower()
         p = st.text_input("Password", type="password")
@@ -299,7 +355,8 @@ elif scelta == "📋 Gestione Task":
             
             if st.button("Conferma Cambio Stato", key=f"up_{t['id']}"):
                 db_update("task", t['id'], {"stato": n_stato})
-                st.success("Stato aggiornato!")
+                sync_stato_commessa(t.get('commessa_ref'))
+                st.success("Stato task e commessa aggiornati!")
                 st.rerun()
 # ==========================================
 # [07] ANALISI COMMESSE
@@ -307,12 +364,29 @@ elif scelta == "📋 Gestione Task":
 elif scelta == "📊 Analisi Commesse":
     st.header("Avanzamento Progetti")
     cs, ts = db_get("commesse"), db_get("task")
+
+    filtro_stato = st.selectbox("Filtra stato commessa", ["Tutti", "Aperto", "Bloccato", "Concluso"], index=0)
+    if filtro_stato != "Tutti":
+        cs = [c for c in cs if c.get('stato', 'Aperto') == filtro_stato]
+
+    if not cs:
+        st.info("Nessuna commessa trovata con questo filtro.")
+
     for c in cs:
         t_comm = [t for t in ts if t.get('commessa_ref') == c.get('codice')]
+        stato_calcolato = calcola_stato_commessa(t_comm)
+        stato_commessa = c.get('stato') or stato_calcolato
+
+        if c.get('stato') != stato_calcolato and c.get('codice'):
+            sync_stato_commessa(c.get('codice'), commesse_cache=cs, task_cache=ts)
+            stato_commessa = stato_calcolato
+
         chiusi = len([t for t in t_comm if t['stato'] == 'Completato'])
         perc = (chiusi / len(t_comm) * 100) if t_comm else 0
-        with st.expander(f"📂 {c['codice']} - {c['cliente']} ({int(perc)}%)"):
-            if ruolo == "Admin": st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
+        with st.expander(f"📂 {c['codice']} - {c['cliente']} | Stato: {stato_commessa} ({int(perc)}%)"):
+            if ruolo == "Admin":
+                st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
+            st.write(f"📌 Stato commessa: **{stato_commessa}**")
             st.progress(perc / 100)
             for tc in t_comm:
                 st.write(f"- {tc.get('assegnato_a')}: {tc.get('descrizione')} [{tc.get('stato')}]")
@@ -356,7 +430,8 @@ elif scelta == "🎯 Assegnazione":
                         "cliente": cli_c, 
                         "budget": bud_c, 
                         "scadenza": str(scad_c),
-                        "pm_assegnato": sel_pm  # Nome colonna corretto del tuo DB
+                        "pm_assegnato": sel_pm,  # Nome colonna corretto del tuo DB
+                        "stato": "Aperto"
                     }
                     res_c = db_insert("commesse", payload_c)
                     if res_c.status_code in [200, 201]:
@@ -407,6 +482,7 @@ elif scelta == "🎯 Assegnazione":
                     res_t = db_insert("task", {"commessa_ref": t_comm_ref, "descrizione": t_desc, "assegnato_a": t_tec, "scadenza": str(t_scad_task), "stato": "In corso"})
                     
                     if res_t.status_code in [200, 201]:
+                        sync_stato_commessa(t_comm_ref)
                         if alert_mostra:
                             st.warning(f"⚠️ Task creato, ma supera la fine commessa ({scad_max_str})!")
                         else:
