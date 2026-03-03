@@ -2,6 +2,7 @@ import streamlit as st
 import httpx
 import smtplib
 import os
+import json
 from email.mime.text import MIMEText
 from datetime import date, datetime
 # REV 01.05
@@ -111,6 +112,10 @@ KEY = _safe_secret("SUPABASE_KEY")
 DB_READY = bool(URL and KEY)
 HEADERS = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"} if DB_READY else {}
 
+AI_API_URL = _safe_secret("AI_API_URL")
+AI_API_KEY = _safe_secret("AI_API_KEY")
+AI_MODEL = _safe_secret("AI_MODEL") or "gpt-4o-mini"
+
 class DbResult:
     def __init__(self, status_code=503, payload=None, text=""):
         self.status_code = status_code
@@ -169,6 +174,91 @@ def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     if commessa.get("stato") != nuovo_stato:
         db_update("commesse", commessa["id"], {"stato": nuovo_stato})
 
+def periodo_giornata(adesso=None):
+    now = adesso or datetime.now()
+    return "mattina" if now.hour < 13 else "pomeriggio"
+
+def riepilogo_task_dashboard(task_utente):
+    oggi = date.today()
+    imminenti, scaduti = [], []
+
+    for t in task_utente:
+        scad = t.get("scadenza")
+        if not scad:
+            continue
+        try:
+            data_scad = date.fromisoformat(scad)
+        except Exception:
+            continue
+
+        diff = (data_scad - oggi).days
+        if diff < 0:
+            scaduti.append(t)
+        elif diff <= 3:
+            imminenti.append(t)
+
+    imminenti.sort(key=lambda x: x.get("scadenza") or "9999-12-31")
+    scaduti.sort(key=lambda x: x.get("scadenza") or "9999-12-31")
+    return imminenti, scaduti
+
+def genera_contenuti_motivazionali(nome, task_aperti, imminenti, scaduti):
+    fallback = {
+        "welcome": f"Buon {periodo_giornata()} {nome}, imposta le priorità e parti dal task più vicino alla scadenza.",
+        "programma_oggi": (
+            f"Programma del {periodo_giornata()}: completa almeno 1 attività critica, "
+            "aggiorna gli stati bloccati e pianifica il prossimo step della commessa."
+        ),
+        "frase_motivazionale": "Ogni task chiuso oggi rende il progetto più solido domani.",
+        "mini_riepilogo": f"Task aperti: {len(task_aperti)} · Imminenti: {len(imminenti)} · Scaduti: {len(scaduti)}"
+    }
+
+    if not AI_API_URL or not AI_API_KEY:
+        return fallback
+
+    payload_prompt = {
+        "nome": nome,
+        "periodo": periodo_giornata(),
+        "totale_task_aperti": len(task_aperti),
+        "task_imminenti": [{"descrizione": t.get("descrizione"), "scadenza": t.get("scadenza")} for t in imminenti[:5]],
+        "task_scaduti": [{"descrizione": t.get("descrizione"), "scadenza": t.get("scadenza")} for t in scaduti[:5]],
+    }
+
+    system_prompt = (
+        "Sei l'assistente motivazionale di un gestionale tecnico. "
+        "Rispondi SOLO in JSON valido con chiavi: welcome, programma_oggi, frase_motivazionale, mini_riepilogo. "
+        "Massimo 25 parole per campo, tono professionale ed energico, in italiano."
+    )
+
+    try:
+        response = httpx.post(
+            AI_API_URL,
+            headers={
+                "Authorization": f"Bearer {AI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": json.dumps(payload_prompt, ensure_ascii=False)},
+                ],
+                "temperature": 0.7,
+            },
+            timeout=12,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        parsed = json.loads(content)
+        return {
+            "welcome": parsed.get("welcome") or fallback["welcome"],
+            "programma_oggi": parsed.get("programma_oggi") or fallback["programma_oggi"],
+            "frase_motivazionale": parsed.get("frase_motivazionale") or fallback["frase_motivazionale"],
+            "mini_riepilogo": parsed.get("mini_riepilogo") or fallback["mini_riepilogo"],
+        }
+    except Exception:
+        return fallback
+
 # ==========================================
 # [03] ACCESSO (LOGIN)
 # ==========================================
@@ -210,7 +300,7 @@ if st.sidebar.button("Logout"):
 # [05] DASHBOARD (REV 01.07)
 # ==========================================
 if scelta == "🏠 Dashboard":
-    st.header(f"Ciao {nome_u}, bentornato/a in Studio")
+    st.header("Dashboard Smart")
     
     # 1. Meteo Bari
     try:
@@ -236,28 +326,42 @@ if scelta == "🏠 Dashboard":
                 imminenti += 1
         except: pass
 
+    imminenti_task, scaduti_task = riepilogo_task_dashboard(miei_aperti)
+    contenuti_ai = genera_contenuti_motivazionali(nome_u, miei_aperti, imminenti_task, scaduti_task)
+
+    st.subheader(f"👋 {contenuti_ai['welcome']}")
+    st.caption(f"🗓️ {contenuti_ai['programma_oggi']}")
+
     # 3. Visualizzazione Metriche
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("I tuoi Task aperti", len(miei_aperti))
     col2.metric("Scadenze imminenti (3gg)", imminenti, delta_color="inverse" if imminenti > 0 else "normal")
+    col3.metric("Task scaduti", len(scaduti_task), delta_color="inverse" if len(scaduti_task) > 0 else "normal")
     
     if ruolo == "Admin":
         cs = db_get("commesse")
         tot_b = sum(float(c.get('budget', 0)) for c in cs)
-        col3.metric("Budget Totale Commesse", f"€ {tot_b:,.2f}")
+        bud_bloccate = sum(float(c.get('budget', 0)) for c in cs if c.get('stato') == 'Bloccato')
+        col4.metric("Budget Totale Commesse", f"€ {tot_b:,.2f}")
+        st.info(f"🔒 Budget commesse bloccate: **€ {bud_bloccate:,.2f}**")
+    else:
+        col4.metric("Task imminenti + scaduti", len(imminenti_task) + len(scaduti_task))
 
     st.divider()
 
-    # 4. Frase Motivazionale Generativa (Logica interna)
-    import random
-    citazioni = [
-        f"Forza {nome_u}, ogni grande progetto inizia con un piccolo passo.",
-        f"L'eccellenza non è un atto, ma un'abitudine. Buon lavoro, {nome_u}!",
-        "Il design è l'anima di ogni creazione umana. Rendila straordinaria oggi.",
-        f"Ehi {nome_u}, la precisione è la chiave di un buon ingegnere.",
-        "Le sfide di oggi sono i successi di domani. MasterGroup conta su di te!"
-    ]
-    st.markdown(f"**💡 Pensiero del giorno:** *{random.choice(citazioni)}*")
+    # 4. Motivazione e mini-riepilogo intelligente
+    st.markdown(f"**💡 Pensiero del giorno:** *{contenuti_ai['frase_motivazionale']}*")
+    st.markdown(f"**🧾 Mini riepilogo:** {contenuti_ai['mini_riepilogo']}")
+
+    if imminenti_task:
+        st.write("**⏳ Task imminenti**")
+        for t in imminenti_task[:3]:
+            st.write(f"- {t.get('commessa_ref')} · {t.get('descrizione')} (scad. {t.get('scadenza')})")
+
+    if scaduti_task:
+        st.write("**🚨 Task scaduti**")
+        for t in scaduti_task[:3]:
+            st.write(f"- {t.get('commessa_ref')} · {t.get('descrizione')} (scad. {t.get('scadenza')})")
 
 # ==========================================
 # [06] GESTIONE TASK (OPERATIVITÀ & PRIORITÀ) REV 01.08
@@ -490,7 +594,6 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
-
 
 
 
