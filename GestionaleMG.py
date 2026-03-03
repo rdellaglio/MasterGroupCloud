@@ -116,6 +116,19 @@ AI_API_URL = _safe_secret("AI_API_URL")
 AI_API_KEY = _safe_secret("AI_API_KEY")
 AI_MODEL = _safe_secret("AI_MODEL") or "gpt-4o-mini"
 
+HUGGINGFACE_API_KEY = _safe_secret("HUGGINGFACE_API_KEY")
+HUGGINGFACE_MODEL = _safe_secret("HUGGINGFACE_MODEL") or "meta-llama/Llama-3.1-8B-Instruct"
+HUGGINGFACE_API_URL = _safe_secret("HUGGINGFACE_API_URL") or "https://router.huggingface.co/v1/chat/completions"
+AI_PROVIDER = (_safe_secret("AI_PROVIDER") or ("huggingface" if HUGGINGFACE_API_KEY else "openai_compatible")).lower()
+
+SMTP_HOST = _safe_secret("SMTP_HOST")
+SMTP_PORT = int(_safe_secret("SMTP_PORT") or 587)
+SMTP_USER = _safe_secret("SMTP_USER")
+SMTP_PASSWORD = _safe_secret("SMTP_PASSWORD")
+SMTP_FROM = _safe_secret("SMTP_FROM") or SMTP_USER
+SMTP_USE_TLS = str(_safe_secret("SMTP_USE_TLS") or "true").lower() in ["1", "true", "yes", "on"]
+NOTIFY_ADMIN_EMAIL = _safe_secret("NOTIFY_ADMIN_EMAIL")
+
 class DbResult:
     def __init__(self, status_code=503, payload=None, text=""):
         self.status_code = status_code
@@ -149,6 +162,18 @@ def db_insert(tabella, payload):
         return httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload, timeout=10)
     except Exception as e:
         return DbResult(text=f"Errore insert DB: {e}")
+
+
+def errore_colonna_mancante(res, colonna_attesa):
+    """Rileva errori PostgREST di colonna non presente in schema cache."""
+    if not res:
+        return False
+    payload_text = (getattr(res, "text", "") or "")
+    return (
+        getattr(res, "status_code", None) in [400, 404]
+        and "PGRST204" in payload_text
+        and colonna_attesa in payload_text
+    )
 
 def calcola_stato_commessa(task_commessa):
     if not task_commessa:
@@ -229,6 +254,178 @@ def riepilogo_task_dashboard(task_utente):
     scaduti.sort(key=lambda x: x.get("scadenza") or "9999-12-31")
     return imminenti, scaduti
 
+
+
+def ai_chat_completion(system_prompt, user_payload, temperature=0.4, timeout=12):
+    if AI_PROVIDER == "huggingface":
+        if not HUGGINGFACE_API_KEY:
+            return None
+        try:
+            response = httpx.post(
+                HUGGINGFACE_API_URL,
+                headers={
+                    "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": HUGGINGFACE_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_payload},
+                    ],
+                    "temperature": temperature,
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip() or None
+        except Exception:
+            return None
+
+    if not AI_API_URL or not AI_API_KEY:
+        return None
+
+    try:
+        response = httpx.post(
+            AI_API_URL,
+            headers={
+                "Authorization": f"Bearer {AI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_payload},
+                ],
+                "temperature": temperature,
+            },
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip() or None
+    except Exception:
+        return None
+
+def genera_testo_mail_blocco_ai(evento):
+    fallback = (
+        f"È stato segnalato un blocco operativo sulla commessa {evento.get('commessa_codice')}.\n\n"
+        f"Task: {evento.get('task_descrizione')}\n"
+        f"Tecnico: {evento.get('tecnico')}\n"
+        f"Data: {evento.get('data_evento')}\n"
+        f"Motivazione: {evento.get('motivazione')}\n\n"
+        "Si richiede presa in carico del blocco e definizione delle azioni correttive."
+    )
+
+    system_prompt = (
+        "Sei un assistente per comunicazioni aziendali. Scrivi un'email in italiano, tono professionale e operativo, "
+        "max 160 parole, senza markdown, con: riepilogo evento, impatto e prossimi passi consigliati."
+    )
+    content = ai_chat_completion(system_prompt, json.dumps(evento, ensure_ascii=False), temperature=0.4, timeout=12)
+    return content or fallback
+
+def invia_mail_blocco(destinatari, oggetto, corpo):
+    if not destinatari:
+        return False, "Nessun destinatario email valido (PM/Admin) trovato."
+    if not (SMTP_HOST and SMTP_FROM):
+        return False, "SMTP non configurato. Imposta SMTP_HOST, SMTP_FROM, SMTP_USER e SMTP_PASSWORD in secrets."
+
+    msg = MIMEText(corpo, "plain", "utf-8")
+    msg["Subject"] = oggetto
+    msg["From"] = SMTP_FROM
+    msg["To"] = ", ".join(destinatari)
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            if SMTP_USE_TLS:
+                server.starttls()
+            if SMTP_USER and SMTP_PASSWORD:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, destinatari, msg.as_string())
+        return True, "Email inviata con successo a PM/Admin."
+    except Exception as e:
+        return False, f"Errore invio email: {e}"
+
+def _email_valida(email):
+    v = str(email or "").strip().lower()
+    return v if "@" in v else None
+
+
+def destinatario_admin(utenti):
+    """Ritorna un solo destinatario admin: preferisce NOTIFY_ADMIN_EMAIL, altrimenti primo Admin per id."""
+    if _email_valida(NOTIFY_ADMIN_EMAIL):
+        return _email_valida(NOTIFY_ADMIN_EMAIL)
+
+    admins = [u for u in utenti if str(u.get("ruolo") or "").strip() == "Admin"]
+    admins.sort(key=lambda x: x.get("id", 10**9))
+    for adm in admins:
+        e = _email_valida(adm.get("email"))
+        if e:
+            return e
+    return None
+
+
+def chiave_ordinamento_commessa_desc(commessa):
+    """Ordina per timestamp se presente, altrimenti per prefisso numerico del codice (decrescente)."""
+    for campo in ["created_at", "createdAt", "data_creazione", "inserted_at"]:
+        val = commessa.get(campo)
+        if val:
+            return (2, str(val))
+
+    codice = str(commessa.get("codice") or "")
+    pref = ""
+    for ch in codice:
+        if ch.isdigit():
+            pref += ch
+        else:
+            break
+    num = int(pref) if pref else -1
+    return (1, f"{num:012d}", codice)
+
+
+def notifica_blocco_task(task, commesse, utenti, motivazione):
+    commessa = next((c for c in commesse if c.get("codice") == task.get("commessa_ref")), None)
+    pm_nome = commessa.get("pm_assegnato") if commessa else None
+
+    destinatari = set()
+
+    # 1 PM per commessa: solo quello assegnato
+    if pm_nome:
+        pm_user = next((u for u in utenti if str(u.get("nome") or "").strip() == str(pm_nome).strip()), None)
+        pm_email = _email_valida(pm_user.get("email") if pm_user else None)
+        if pm_email:
+            destinatari.add(pm_email)
+
+    # 1 Admin: configurabile o primo admin disponibile
+    admin_email = destinatario_admin(utenti)
+    if admin_email:
+        destinatari.add(admin_email)
+
+    # Formato oggetto richiesto: nome commessa - Attività in Blocco - nome tecnico
+    nome_commessa = task.get("commessa_ref") or (commessa.get("cliente") if commessa else "N/D")
+    oggetto = f"{nome_commessa} - Attività in Blocco - {task.get('assegnato_a')}"
+    evento = {
+        "commessa_codice": task.get("commessa_ref"),
+        "commessa_cliente": commessa.get("cliente") if commessa else "N/D",
+        "task_descrizione": task.get("descrizione"),
+        "tecnico": task.get("assegnato_a"),
+        "data_evento": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "motivazione": motivazione,
+    }
+    corpo = genera_testo_mail_blocco_ai(evento)
+    return invia_mail_blocco(sorted(destinatari), oggetto, corpo)
+
+
+def routine_invio_mail_blocco(prev_stato, nuovo_stato, task, commesse, utenti, motivazione_blocco):
+    """Invia email solo alla transizione verso stato Bloccato, evitando invii duplicati."""
+    if nuovo_stato != "Bloccato":
+        return False, "Nessuna notifica: stato non bloccato."
+    if prev_stato == "Bloccato":
+        return False, "Nessuna notifica: task già bloccato (evitato invio duplicato)."
+    return notifica_blocco_task(task, commesse, utenti, motivazione_blocco)
+
 def genera_contenuti_motivazionali(nome, task_aperti, imminenti, scaduti):
     fallback = {
         "welcome": f"Buon {periodo_giornata()} {nome}, imposta le priorità e parti dal task più vicino alla scadenza.",
@@ -239,9 +436,6 @@ def genera_contenuti_motivazionali(nome, task_aperti, imminenti, scaduti):
         "frase_motivazionale": "Ogni task chiuso oggi rende il progetto più solido domani.",
         "mini_riepilogo": f"Task aperti: {len(task_aperti)} · Imminenti: {len(imminenti)} · Scaduti: {len(scaduti)}"
     }
-
-    if not AI_API_URL or not AI_API_KEY:
-        return fallback
 
     payload_prompt = {
         "nome": nome,
@@ -257,26 +451,11 @@ def genera_contenuti_motivazionali(nome, task_aperti, imminenti, scaduti):
         "Massimo 25 parole per campo, tono professionale ed energico, in italiano."
     )
 
+    content = ai_chat_completion(system_prompt, json.dumps(payload_prompt, ensure_ascii=False), temperature=0.7, timeout=12)
+    if not content:
+        return fallback
+
     try:
-        response = httpx.post(
-            AI_API_URL,
-            headers={
-                "Authorization": f"Bearer {AI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": AI_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(payload_prompt, ensure_ascii=False)},
-                ],
-                "temperature": 0.7,
-            },
-            timeout=12,
-        )
-        response.raise_for_status()
-        data = response.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         parsed = json.loads(content)
         return {
             "welcome": parsed.get("welcome") or fallback["welcome"],
@@ -484,11 +663,62 @@ elif scelta == "📋 Gestione Task":
             stati_lista = ["In corso", "Bloccato", "Completato"]
             idx_s = stati_lista.index(t['stato']) if t['stato'] in stati_lista else 0
             n_stato = st.selectbox("Nuovo Stato", stati_lista, index=idx_s, key=f"st_{t['id']}")
+            motivazione_blocco = ""
+            if n_stato == "Bloccato":
+                motivazione_blocco = st.text_area(
+                    "Motivazione blocco (obbligatoria)",
+                    value=t.get("motivazione_blocco") or "",
+                    key=f"mb_{t['id']}",
+                    placeholder="Descrivi impedimento, impatto e supporto richiesto..."
+                ).strip()
             
             if st.button("Conferma Cambio Stato", key=f"up_{t['id']}"):
-                db_update("task", t['id'], {"stato": n_stato})
+                if n_stato == "Bloccato" and not motivazione_blocco:
+                    st.warning("Inserisci una motivazione prima di impostare il task come Bloccato.")
+                    st.stop()
+
+                payload_update = {"stato": n_stato}
+                if n_stato == "Bloccato":
+                    payload_update["motivazione_blocco"] = motivazione_blocco
+                else:
+                    payload_update["motivazione_blocco"] = None
+
+                res_up = db_update("task", t['id'], payload_update)
+                motivazione_salvata = True
+
+                # Fallback compatibilità: se la migrazione DB non è stata ancora applicata,
+                # aggiorniamo almeno lo stato task evitando errore bloccante in UI.
+                if errore_colonna_mancante(res_up, "motivazione_blocco"):
+                    motivazione_salvata = False
+                    res_up = db_update("task", t['id'], {"stato": n_stato})
+
+                if res_up.status_code not in [200, 204]:
+                    st.error(f"Errore aggiornamento task: {res_up.text}")
+                    st.stop()
+
                 sync_stato_commessa(t.get('commessa_ref'))
-                st.success("Stato task e commessa aggiornati!")
+
+                if n_stato == "Bloccato":
+                    if not motivazione_salvata:
+                        st.warning(
+                            "Stato aggiornato, ma la motivazione non è stata salvata: "
+                            "applica la migrazione `db_migrazione_blocco_task.sql`."
+                        )
+
+                    ok_mail, msg_mail = routine_invio_mail_blocco(
+                        prev_stato=t.get("stato"),
+                        nuovo_stato=n_stato,
+                        task=t,
+                        commesse=cs,
+                        utenti=us,
+                        motivazione_blocco=motivazione_blocco,
+                    )
+                    if ok_mail:
+                        st.success("Stato aggiornato. " + msg_mail)
+                    else:
+                        st.info("Stato aggiornato. " + msg_mail)
+                else:
+                    st.success("Stato task e commessa aggiornati!")
                 st.rerun()
 # ==========================================
 # [07] ANALISI COMMESSE
@@ -498,12 +728,26 @@ elif scelta == "📊 Analisi Commesse":
     cs, ts = db_get("commesse"), db_get("task")
     oggi = date.today()
 
-    filtro_stato = st.selectbox("Filtra stato commessa", ["Tutti", "Aperto", "Bloccato", "Concluso"], index=0)
+    c_fil1, c_fil2 = st.columns([1, 2])
+    filtro_stato = c_fil1.selectbox("Filtra stato commessa", ["Tutti", "Aperto", "Bloccato", "Concluso"], index=0)
+    query_cerca = c_fil2.text_input("🔎 Cerca commessa (codice, cliente, PM)").strip().lower()
+
     if filtro_stato != "Tutti":
         cs = [c for c in cs if c.get('stato', 'Aperto') == filtro_stato]
 
+    if query_cerca:
+        cs = [
+            c for c in cs
+            if query_cerca in str(c.get("codice", "")).lower()
+            or query_cerca in str(c.get("cliente", "")).lower()
+            or query_cerca in str(c.get("pm_assegnato", "")).lower()
+        ]
+
+    # Default: commesse più recenti prima (se c'è timestamp), altrimenti prefisso numerico codice desc.
+    cs = sorted(cs, key=chiave_ordinamento_commessa_desc, reverse=True)
+
     if not cs:
-        st.info("Nessuna commessa trovata con questo filtro.")
+        st.info("Nessuna commessa trovata con questo filtro/ricerca.")
 
     for c in cs:
         t_comm = [t for t in ts if t.get('commessa_ref') == c.get('codice')]
@@ -517,9 +761,11 @@ elif scelta == "📊 Analisi Commesse":
         chiusi = len([t for t in t_comm if t['stato'] == 'Completato'])
         perc = (chiusi / len(t_comm) * 100) if t_comm else 0
         icona_commessa = icona_stato_commessa(stato_commessa)
-        with st.expander(f"{icona_commessa} {c['codice']} - {c['cliente']} | Stato: {stato_commessa} ({int(perc)}%)"):
+        pm_commessa = c.get("pm_assegnato") or "Non assegnato"
+        with st.expander(f"{icona_commessa} {c['codice']} - {c['cliente']} | PM: {pm_commessa} | Stato: {stato_commessa} ({int(perc)}%)"):
             if ruolo == "Admin":
                 st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
+            st.write(f"👤 PM incaricato: **{pm_commessa}**")
             st.write(f"📌 Stato commessa: **{icona_commessa} {stato_commessa}**")
             st.progress(perc / 100)
             for tc in t_comm:
@@ -560,7 +806,7 @@ elif scelta == "🎯 Assegnazione":
             
             # --- SELEZIONE PM (Filtro per Ruolo) ---
             # Filtriamo gli utenti qualificati come PM o Admin dall'elenco 'us' caricato a inizio sezione
-            elenco_pm = [usr.get('nome') for usr in us if usr.get('ruolo') in ['PM', 'Admin']]
+            elenco_pm = [usr.get('nome') for usr in us if usr.get('ruolo') == 'PM']
             sel_pm = st.selectbox("Seleziona PM Responsabile", elenco_pm)
             
             if st.form_submit_button("Crea Commessa"):
@@ -630,6 +876,5 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
-
 
 
