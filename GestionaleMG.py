@@ -390,16 +390,21 @@ def invia_mail_blocco(destinatari, oggetto, corpo):
 def notifica_blocco_task(task, commesse, utenti, motivazione):
     commessa = next((c for c in commesse if c.get("codice") == task.get("commessa_ref")), None)
     pm_nome = commessa.get("pm_assegnato") if commessa else None
+    pm_email = None
 
     admin_users = [u for u in utenti if u.get("ruolo") == "Admin"]
     destinatari = set()
     if pm_nome:
         pm_user = next((u for u in utenti if u.get("nome") == pm_nome), None)
         if pm_user and pm_user.get("email"):
-            destinatari.add(pm_user.get("email"))
+            pm_email = pm_user.get("email")
+            destinatari.add(pm_email)
+    admin_emails = []
     for adm in admin_users:
         if adm.get("email"):
-            destinatari.add(adm.get("email"))
+            email = adm.get("email")
+            admin_emails.append(email)
+            destinatari.add(email)
 
     # Formato oggetto richiesto: nome commessa - Attività in Blocco - nome tecnico
     nome_commessa = task.get("commessa_ref") or (commessa.get("cliente") if commessa else "N/D")
@@ -415,6 +420,7 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
     corpo = genera_testo_mail_blocco_ai(evento)
     ok, msg = invia_mail_blocco(sorted(destinatari), oggetto, corpo)
     if ok:
+        admin_email = ", ".join(sorted(set(admin_emails))) if admin_emails else None
         dettaglio = f" Destinatari: PM={pm_email or 'N/D'}, Admin={admin_email or 'N/D'}."
         return True, msg + dettaglio
     return False, msg
