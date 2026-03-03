@@ -434,6 +434,16 @@ def routine_invio_mail_blocco(prev_stato, nuovo_stato, task, commesse, utenti, m
         return False, "Nessuna notifica: task già bloccato (evitato invio duplicato)."
     return notifica_blocco_task(task, commesse, utenti, motivazione_blocco)
 
+
+def genera_password_temporanea(lunghezza=12):
+    caratteri = string.ascii_letters + string.digits + "@#_-"
+    return "".join(secrets.choice(caratteri) for _ in range(lunghezza))
+
+
+def email_valida(email):
+    pattern = r"^[\w\.-]+@[\w\.-]+\.[A-Za-z]{2,}$"
+    return bool(re.match(pattern, str(email or "").strip()))
+
 def genera_contenuti_motivazionali(nome, task_aperti, imminenti, scaduti):
     fallback = {
         "welcome": f"Buon {periodo_giornata()} {nome}, imposta le priorità e parti dal task più vicino alla scadenza.",
@@ -898,3 +908,82 @@ elif scelta == "👥 Gestione Utenti":
 
     if "pwd_temp_admin" not in st.session_state:
         st.session_state.pwd_temp_admin = genera_password_temporanea()
+
+    with st.form("form_nuovo_utente_admin", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        nome_nuovo = c1.text_input("Nome completo").strip()
+        email_nuova = c2.text_input("Email").strip().lower()
+
+        c3, c4, c5 = st.columns([1, 1, 1])
+        ruolo_nuovo = c3.selectbox("Ruolo", ["Tecnico", "PM", "Admin"], index=0)
+        tipo_utente = c4.selectbox("Classificazione", ["Interno", "Esterno"], index=0)
+        rigenera_pwd = c5.form_submit_button("🔄 Rigenera password")
+
+        if rigenera_pwd:
+            st.session_state.pwd_temp_admin = genera_password_temporanea()
+
+        password_temporanea = st.text_input(
+            "Password temporanea",
+            value=st.session_state.pwd_temp_admin,
+            type="default",
+            help="Puoi modificarla prima di creare l'utente.",
+        )
+
+        crea_utente = st.form_submit_button("✅ Crea utente")
+
+        if crea_utente:
+            if not nome_nuovo:
+                st.warning("Inserisci il nome dell'utente.")
+            elif not email_valida(email_nuova):
+                st.warning("Inserisci un indirizzo email valido.")
+            elif len(password_temporanea.strip()) < 8:
+                st.warning("La password temporanea deve avere almeno 8 caratteri.")
+            else:
+                email_duplicata = any(str(u.get("email", "")).lower() == email_nuova for u in utenti)
+                if email_duplicata:
+                    st.error("Esiste già un utente con questa email.")
+                else:
+                    payload = {
+                        "nome": nome_nuovo,
+                        "email": email_nuova,
+                        "password": password_temporanea.strip(),
+                        "ruolo": ruolo_nuovo,
+                        "interno_esterno": tipo_utente,
+                    }
+
+                    res_user = db_insert("utenti", payload)
+
+                    if res_user.status_code in [200, 201]:
+                        st.success(f"✅ Utente {nome_nuovo} creato con ruolo {ruolo_nuovo}.")
+                        st.session_state.pwd_temp_admin = genera_password_temporanea()
+                        st.rerun()
+                    elif errore_colonna_mancante(res_user, "interno_esterno"):
+                        payload_fallback = dict(payload)
+                        payload_fallback.pop("interno_esterno", None)
+                        res_fallback = db_insert("utenti", payload_fallback)
+                        if res_fallback.status_code in [200, 201]:
+                            st.warning(
+                                "Utente creato ma senza classificazione interno/esterno. "
+                                "Esegui la migrazione `db_migrazione_utenti_interno_esterno.sql`."
+                            )
+                            st.session_state.pwd_temp_admin = genera_password_temporanea()
+                            st.rerun()
+                        else:
+                            st.error(f"Errore DB fallback: {res_fallback.status_code} · {res_fallback.text}")
+                    else:
+                        st.error(f"Errore DB: {res_user.status_code} · {res_user.text}")
+
+    st.divider()
+    st.subheader("Utenti registrati")
+    if utenti:
+        vista = []
+        for u in utenti:
+            vista.append({
+                "Nome": u.get("nome"),
+                "Email": u.get("email"),
+                "Ruolo": u.get("ruolo"),
+                "Classificazione": u.get("interno_esterno", "N/D"),
+            })
+        st.dataframe(vista, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nessun utente presente nel database.")
