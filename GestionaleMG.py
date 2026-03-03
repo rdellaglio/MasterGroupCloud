@@ -162,6 +162,18 @@ def db_insert(tabella, payload):
     except Exception as e:
         return DbResult(text=f"Errore insert DB: {e}")
 
+
+def errore_colonna_mancante(res, colonna_attesa):
+    """Rileva errori PostgREST di colonna non presente in schema cache."""
+    if not res:
+        return False
+    payload_text = (getattr(res, "text", "") or "")
+    return (
+        getattr(res, "status_code", None) in [400, 404]
+        and "PGRST204" in payload_text
+        and colonna_attesa in payload_text
+    )
+
 def calcola_stato_commessa(task_commessa):
     if not task_commessa:
         return "Aperto"
@@ -349,7 +361,8 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
         if adm.get("email"):
             destinatari.add(adm.get("email"))
 
-    nome_commessa = commessa.get("cliente") if commessa else task.get("commessa_ref")
+    # Formato oggetto richiesto: nome commessa - Attività in Blocco - nome tecnico
+    nome_commessa = task.get("commessa_ref") or (commessa.get("cliente") if commessa else "N/D")
     oggetto = f"{nome_commessa} - Attività in Blocco - {task.get('assegnato_a')}"
     evento = {
         "commessa_codice": task.get("commessa_ref"),
@@ -361,6 +374,15 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
     }
     corpo = genera_testo_mail_blocco_ai(evento)
     return invia_mail_blocco(sorted(destinatari), oggetto, corpo)
+
+
+def routine_invio_mail_blocco(prev_stato, nuovo_stato, task, commesse, utenti, motivazione_blocco):
+    """Invia email solo alla transizione verso stato Bloccato, evitando invii duplicati."""
+    if nuovo_stato != "Bloccato":
+        return False, "Nessuna notifica: stato non bloccato."
+    if prev_stato == "Bloccato":
+        return False, "Nessuna notifica: task già bloccato (evitato invio duplicato)."
+    return notifica_blocco_task(task, commesse, utenti, motivazione_blocco)
 
 def genera_contenuti_motivazionali(nome, task_aperti, imminenti, scaduti):
     fallback = {
@@ -620,6 +642,14 @@ elif scelta == "📋 Gestione Task":
                     payload_update["motivazione_blocco"] = None
 
                 res_up = db_update("task", t['id'], payload_update)
+                motivazione_salvata = True
+
+                # Fallback compatibilità: se la migrazione DB non è stata ancora applicata,
+                # aggiorniamo almeno lo stato task evitando errore bloccante in UI.
+                if errore_colonna_mancante(res_up, "motivazione_blocco"):
+                    motivazione_salvata = False
+                    res_up = db_update("task", t['id'], {"stato": n_stato})
+
                 if res_up.status_code not in [200, 204]:
                     st.error(f"Errore aggiornamento task: {res_up.text}")
                     st.stop()
@@ -627,11 +657,24 @@ elif scelta == "📋 Gestione Task":
                 sync_stato_commessa(t.get('commessa_ref'))
 
                 if n_stato == "Bloccato":
-                    ok_mail, msg_mail = notifica_blocco_task(t, cs, us, motivazione_blocco)
+                    if not motivazione_salvata:
+                        st.warning(
+                            "Stato aggiornato, ma la motivazione non è stata salvata: "
+                            "applica la migrazione `db_migrazione_blocco_task.sql`."
+                        )
+
+                    ok_mail, msg_mail = routine_invio_mail_blocco(
+                        prev_stato=t.get("stato"),
+                        nuovo_stato=n_stato,
+                        task=t,
+                        commesse=cs,
+                        utenti=us,
+                        motivazione_blocco=motivazione_blocco,
+                    )
                     if ok_mail:
                         st.success("Stato aggiornato. " + msg_mail)
                     else:
-                        st.warning("Stato aggiornato ma notifica email non inviata. " + msg_mail)
+                        st.info("Stato aggiornato. " + msg_mail)
                 else:
                     st.success("Stato task e commessa aggiornati!")
                 st.rerun()

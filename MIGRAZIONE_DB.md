@@ -61,6 +61,10 @@ Per abilitare la motivazione obbligatoria quando un task va in **Bloccato**, ese
 
 Verifica rapida:
 
+> Se vedi l'errore `PGRST204` su `motivazione_blocco`, significa che la migrazione non è stata applicata nel DB corrente.
+> L'app ora aggiorna comunque lo stato task, ma devi eseguire `db_migrazione_blocco_task.sql` per salvare la motivazione su DB.
+
+
 ```sql
 SELECT column_name, data_type
 FROM information_schema.columns
@@ -119,3 +123,8 @@ AI_MODEL = "gpt-4o-mini"
 ```
 
 Se AI non è configurata, il sistema invia testo fallback statico.
+
+
+## Routine invio mail blocco task
+La notifica email parte automaticamente **solo quando il task passa da uno stato diverso a `Bloccato`**.
+Se il task è già `Bloccato` e viene salvato di nuovo, l'app evita invii duplicati.
