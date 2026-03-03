@@ -3,6 +3,8 @@ import httpx
 import smtplib
 import os
 import json
+import secrets
+import string
 from email.mime.text import MIMEText
 from datetime import date, datetime
 from urllib.parse import urlencode
@@ -188,6 +190,10 @@ def errore_colonna_mancante(res, colonna_attesa):
         and "PGRST204" in payload_text
         and colonna_attesa in payload_text
     )
+
+def genera_password_temporanea(lunghezza=12):
+    alfabeti = string.ascii_letters + string.digits + "!@#$%"
+    return "".join(secrets.choice(alfabeti) for _ in range(lunghezza))
 
 def calcola_stato_commessa(task_commessa):
     if not task_commessa:
@@ -470,6 +476,7 @@ st.sidebar.divider()
 
 menu = ["🏠 Dashboard", "📋 Gestione Task"]
 if ruolo in ["Admin", "PM"]: menu.extend(["📊 Analisi Commesse", "🎯 Assegnazione"])
+if ruolo == "Admin": menu.append("👥 Gestione Utenti")
 
 scelta = st.sidebar.radio("Navigazione", menu)
 if st.sidebar.button("Logout"):
@@ -850,3 +857,74 @@ elif scelta == "🎯 Assegnazione":
                     else:
                         st.error("Errore creazione task.")
 
+# ==========================================
+# [09] GESTIONE UTENTI (SOLO ADMIN)
+# ==========================================
+elif scelta == "👥 Gestione Utenti":
+    st.header("Tool Admin · Generazione Nuovi Utenti")
+    st.caption("Crea account applicativi e assegna classificazione interno/esterno.")
+
+    utenti = db_get("utenti", order="nome.asc")
+    st.subheader("Nuovo utente")
+
+    if "pwd_temp_admin" not in st.session_state:
+        st.session_state.pwd_temp_admin = genera_password_temporanea()
+
+    c_pwd, c_hint = st.columns([1, 1])
+    if c_pwd.button("🔐 Genera password temporanea"):
+        st.session_state.pwd_temp_admin = genera_password_temporanea()
+    c_hint.info("Suggerimento: comunica la password via canale separato e falla cambiare al primo accesso.")
+
+    with st.form("form_nuovo_utente", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        nome_nuovo = c1.text_input("Nome e Cognome")
+        email_nuova = c2.text_input("Email aziendale").strip().lower()
+
+        c3, c4 = st.columns(2)
+        ruolo_nuovo = c3.selectbox("Ruolo", ["Operatore", "PM", "Admin"])
+        tipologia_nuova = c4.selectbox("Tipologia", ["Interno", "Esterno"])
+
+        password_nuova = st.text_input("Password iniziale", value=st.session_state.pwd_temp_admin)
+
+        if st.form_submit_button("➕ Crea utente"):
+            if not nome_nuovo or not email_nuova or not password_nuova:
+                st.warning("Compila Nome, Email e Password.")
+            elif any(str(u.get("email", "")).lower() == email_nuova for u in utenti):
+                st.warning("Email già presente. Usa un altro indirizzo.")
+            else:
+                payload_utente = {
+                    "nome": nome_nuovo.strip(),
+                    "email": email_nuova,
+                    "password": password_nuova,
+                    "ruolo": ruolo_nuovo,
+                    "interno_esterno": tipologia_nuova,
+                }
+                res_u = db_insert("utenti", payload_utente)
+
+                if res_u.status_code in [200, 201]:
+                    st.success(f"✅ Utente {nome_nuovo} creato correttamente.")
+                    st.session_state.pwd_temp_admin = genera_password_temporanea()
+                    st.rerun()
+                elif errore_colonna_mancante(res_u, "interno_esterno"):
+                    payload_fallback = dict(payload_utente)
+                    payload_fallback.pop("interno_esterno", None)
+                    res_fallback = db_insert("utenti", payload_fallback)
+                    if res_fallback.status_code in [200, 201]:
+                        st.warning(
+                            "Utente creato, ma il campo 'interno_esterno' non è stato salvato. "
+                            "Applica la migrazione `db_migrazione_utenti_interno_esterno.sql`."
+                        )
+                        st.rerun()
+                    else:
+                        st.error(f"Errore creazione utente: {res_fallback.text}")
+                else:
+                    st.error(f"Errore creazione utente: {res_u.text}")
+
+    st.divider()
+    st.subheader("Elenco utenti")
+    if not utenti:
+        st.info("Nessun utente presente nel database.")
+    else:
+        for usr in utenti:
+            tag_tipo = usr.get("interno_esterno") or "(non impostato)"
+            st.write(f"- **{usr.get('nome')}** · {usr.get('ruolo')} · {tag_tipo} · {usr.get('email')}")
