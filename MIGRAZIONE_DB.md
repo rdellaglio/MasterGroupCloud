@@ -30,3 +30,22 @@ Atteso:
 - `NOT NULL`
 - default `Aperto`
 - valori solo `Aperto`, `Bloccato`, `Concluso`.
+
+## Ripopolamento dati demo (commesse + task)
+Per fare debug rapido con dati fittizi, puoi usare lo script:
+
+```bash
+python scripts/reseed_demo_data.py
+```
+
+Prerequisiti (variabili ambiente):
+
+```bash
+export SUPABASE_URL='https://<project>.supabase.co'
+export SUPABASE_KEY='<service-role-or-anon-key>'
+```
+
+Cosa fa lo script:
+- elimina i dati esistenti in `task` e `commesse`;
+- inserisce **50 commesse** con nomi/clienti di fantasia;
+- inserisce **200 task** (4 per commessa) con attività/stati casuali di fantasia.
