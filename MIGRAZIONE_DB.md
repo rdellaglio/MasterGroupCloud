@@ -123,3 +123,8 @@ AI_MODEL = "gpt-4o-mini"
 ```
 
 Se AI non è configurata, il sistema invia testo fallback statico.
+
+
+## Routine invio mail blocco task
+La notifica email parte automaticamente **solo quando il task passa da uno stato diverso a `Bloccato`**.
+Se il task è già `Bloccato` e viene salvato di nuovo, l'app evita invii duplicati.

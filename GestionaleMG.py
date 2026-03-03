@@ -361,7 +361,8 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
         if adm.get("email"):
             destinatari.add(adm.get("email"))
 
-    nome_commessa = commessa.get("cliente") if commessa else task.get("commessa_ref")
+    # Formato oggetto richiesto: nome commessa - Attività in Blocco - nome tecnico
+    nome_commessa = task.get("commessa_ref") or (commessa.get("cliente") if commessa else "N/D")
     oggetto = f"{nome_commessa} - Attività in Blocco - {task.get('assegnato_a')}"
     evento = {
         "commessa_codice": task.get("commessa_ref"),
@@ -373,6 +374,15 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
     }
     corpo = genera_testo_mail_blocco_ai(evento)
     return invia_mail_blocco(sorted(destinatari), oggetto, corpo)
+
+
+def routine_invio_mail_blocco(prev_stato, nuovo_stato, task, commesse, utenti, motivazione_blocco):
+    """Invia email solo alla transizione verso stato Bloccato, evitando invii duplicati."""
+    if nuovo_stato != "Bloccato":
+        return False, "Nessuna notifica: stato non bloccato."
+    if prev_stato == "Bloccato":
+        return False, "Nessuna notifica: task già bloccato (evitato invio duplicato)."
+    return notifica_blocco_task(task, commesse, utenti, motivazione_blocco)
 
 def genera_contenuti_motivazionali(nome, task_aperti, imminenti, scaduti):
     fallback = {
@@ -653,11 +663,18 @@ elif scelta == "📋 Gestione Task":
                             "applica la migrazione `db_migrazione_blocco_task.sql`."
                         )
 
-                    ok_mail, msg_mail = notifica_blocco_task(t, cs, us, motivazione_blocco)
+                    ok_mail, msg_mail = routine_invio_mail_blocco(
+                        prev_stato=t.get("stato"),
+                        nuovo_stato=n_stato,
+                        task=t,
+                        commesse=cs,
+                        utenti=us,
+                        motivazione_blocco=motivazione_blocco,
+                    )
                     if ok_mail:
                         st.success("Stato aggiornato. " + msg_mail)
                     else:
-                        st.warning("Stato aggiornato ma notifica email non inviata. " + msg_mail)
+                        st.info("Stato aggiornato. " + msg_mail)
                 else:
                     st.success("Stato task e commessa aggiornati!")
                 st.rerun()
