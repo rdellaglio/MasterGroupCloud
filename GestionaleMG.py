@@ -169,6 +169,35 @@ def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     if commessa.get("stato") != nuovo_stato:
         db_update("commesse", commessa["id"], {"stato": nuovo_stato})
 
+def esegui_controllo_sistema():
+    checks = []
+
+    checks.append(("Configurazione DB", DB_READY, "Credenziali Supabase presenti" if DB_READY else "Mancano SUPABASE_URL o SUPABASE_KEY"))
+
+    if DB_READY:
+        try:
+            res_db = httpx.get(f"{URL}/rest/v1/utenti?select=id&limit=1", headers=HEADERS, timeout=5)
+            ok_db = res_db.status_code == 200
+            checks.append(("Connessione DB", ok_db, f"HTTP {res_db.status_code}"))
+        except Exception as e:
+            checks.append(("Connessione DB", False, f"Errore: {e}"))
+    else:
+        checks.append(("Connessione DB", False, "Configurazione mancante"))
+
+    try:
+        res_weather = httpx.get("https://api.open-meteo.com/v1/forecast?latitude=41.11&longitude=16.87&current_weather=true", timeout=5)
+        checks.append(("Servizio Meteo", res_weather.status_code == 200, f"HTTP {res_weather.status_code}"))
+    except Exception as e:
+        checks.append(("Servizio Meteo", False, f"Errore: {e}"))
+
+    smtp_host = _safe_secret("SMTP_HOST")
+    smtp_user = _safe_secret("SMTP_USER")
+    smtp_pass = _safe_secret("SMTP_PASS")
+    smtp_ready = bool(smtp_host and smtp_user and smtp_pass)
+    checks.append(("Configurazione SMTP", smtp_ready, "Parametri email configurati" if smtp_ready else "Parametri SMTP mancanti"))
+
+    return checks
+
 # ==========================================
 # [03] ACCESSO (LOGIN)
 # ==========================================
@@ -258,6 +287,18 @@ if scelta == "🏠 Dashboard":
         "Le sfide di oggi sono i successi di domani. MasterGroup conta su di te!"
     ]
     st.markdown(f"**💡 Pensiero del giorno:** *{random.choice(citazioni)}*")
+
+    st.divider()
+    st.subheader("🩺 Controllo sistema")
+    check_sistema = esegui_controllo_sistema()
+    ok_totali = len([c for c in check_sistema if c[1]])
+    st.caption(f"Stato servizi: {ok_totali}/{len(check_sistema)} controlli superati")
+
+    for nome_check, esito, dettaglio in check_sistema:
+        if esito:
+            st.success(f"✅ {nome_check}: {dettaglio}")
+        else:
+            st.error(f"❌ {nome_check}: {dettaglio}")
 
 # ==========================================
 # [06] GESTIONE TASK (OPERATIVITÀ & PRIORITÀ) REV 01.08
@@ -490,7 +531,6 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
-
 
 
 
