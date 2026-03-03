@@ -5,6 +5,7 @@ import os
 import json
 from email.mime.text import MIMEText
 from datetime import date, datetime
+from urllib.parse import urlencode
 # REV 01.05
 # ==========================================
 # [01] CONFIGURAZIONE & BRANDING
@@ -127,7 +128,6 @@ SMTP_USER = _safe_secret("SMTP_USER")
 SMTP_PASSWORD = _safe_secret("SMTP_PASSWORD")
 SMTP_FROM = _safe_secret("SMTP_FROM") or SMTP_USER
 SMTP_USE_TLS = str(_safe_secret("SMTP_USE_TLS") or "true").lower() in ["1", "true", "yes", "on"]
-NOTIFY_ADMIN_EMAIL = _safe_secret("NOTIFY_ADMIN_EMAIL")
 
 class DbResult:
     def __init__(self, status_code=503, payload=None, text=""):
@@ -138,11 +138,21 @@ class DbResult:
     def json(self):
         return self._payload
 
-def db_get(tabella):
+@st.cache_data(ttl=30, show_spinner=False)
+def db_get(tabella, select="*", filtri=None, order=None, limit=None):
     if not DB_READY:
         return []
     try:
-        res = httpx.get(f"{URL}/rest/v1/{tabella}?select=*", headers=HEADERS, timeout=10)
+        params = {"select": select}
+        if filtri:
+            params.update(filtri)
+        if order:
+            params["order"] = order
+        if limit is not None:
+            params["limit"] = str(limit)
+
+        query = urlencode(params, doseq=True, safe=",().")
+        res = httpx.get(f"{URL}/rest/v1/{tabella}?{query}", headers=HEADERS, timeout=10)
         return res.json() if res.status_code == 200 else []
     except:
         return []
@@ -151,7 +161,9 @@ def db_update(tabella, id_riga, payload):
     if not DB_READY:
         return DbResult(text="DB non configurato. Imposta SUPABASE_URL e SUPABASE_KEY in secrets.toml.")
     try:
-        return httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload, timeout=10)
+        result = httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload, timeout=10)
+        db_get.clear()
+        return result
     except Exception as e:
         return DbResult(text=f"Errore update DB: {e}")
 
@@ -159,7 +171,9 @@ def db_insert(tabella, payload):
     if not DB_READY:
         return DbResult(text="DB non configurato. Imposta SUPABASE_URL e SUPABASE_KEY in secrets.toml.")
     try:
-        return httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload, timeout=10)
+        result = httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload, timeout=10)
+        db_get.clear()
+        return result
     except Exception as e:
         return DbResult(text=f"Errore insert DB: {e}")
 
@@ -348,60 +362,19 @@ def invia_mail_blocco(destinatari, oggetto, corpo):
     except Exception as e:
         return False, f"Errore invio email: {e}"
 
-def _email_valida(email):
-    v = str(email or "").strip().lower()
-    return v if "@" in v else None
-
-
-def destinatario_admin(utenti):
-    """Ritorna un solo destinatario admin: preferisce NOTIFY_ADMIN_EMAIL, altrimenti primo Admin per id."""
-    if _email_valida(NOTIFY_ADMIN_EMAIL):
-        return _email_valida(NOTIFY_ADMIN_EMAIL)
-
-    admins = [u for u in utenti if str(u.get("ruolo") or "").strip() == "Admin"]
-    admins.sort(key=lambda x: x.get("id", 10**9))
-    for adm in admins:
-        e = _email_valida(adm.get("email"))
-        if e:
-            return e
-    return None
-
-
-def chiave_ordinamento_commessa_desc(commessa):
-    """Ordina per timestamp se presente, altrimenti per prefisso numerico del codice (decrescente)."""
-    for campo in ["created_at", "createdAt", "data_creazione", "inserted_at"]:
-        val = commessa.get(campo)
-        if val:
-            return (2, str(val))
-
-    codice = str(commessa.get("codice") or "")
-    pref = ""
-    for ch in codice:
-        if ch.isdigit():
-            pref += ch
-        else:
-            break
-    num = int(pref) if pref else -1
-    return (1, f"{num:012d}", codice)
-
-
 def notifica_blocco_task(task, commesse, utenti, motivazione):
     commessa = next((c for c in commesse if c.get("codice") == task.get("commessa_ref")), None)
     pm_nome = commessa.get("pm_assegnato") if commessa else None
 
+    admin_users = [u for u in utenti if u.get("ruolo") == "Admin"]
     destinatari = set()
-
-    # 1 PM per commessa: solo quello assegnato
     if pm_nome:
-        pm_user = next((u for u in utenti if str(u.get("nome") or "").strip() == str(pm_nome).strip()), None)
-        pm_email = _email_valida(pm_user.get("email") if pm_user else None)
-        if pm_email:
-            destinatari.add(pm_email)
-
-    # 1 Admin: configurabile o primo admin disponibile
-    admin_email = destinatario_admin(utenti)
-    if admin_email:
-        destinatari.add(admin_email)
+        pm_user = next((u for u in utenti if u.get("nome") == pm_nome), None)
+        if pm_user and pm_user.get("email"):
+            destinatari.add(pm_user.get("email"))
+    for adm in admin_users:
+        if adm.get("email"):
+            destinatari.add(adm.get("email"))
 
     # Formato oggetto richiesto: nome commessa - Attività in Blocco - nome tecnico
     nome_commessa = task.get("commessa_ref") or (commessa.get("cliente") if commessa else "N/D")
@@ -575,11 +548,11 @@ if scelta == "🏠 Dashboard":
 # ==========================================
 elif scelta == "📋 Gestione Task":
     st.header("Monitoraggio Attività")
-    ts, cs, us = db_get("task"), db_get("commesse"), db_get("utenti")
+    cs, us = db_get("commesse"), db_get("utenti")
     oggi = date.today()
 
     # --- FILTRI INCROCIATI ---
-    f1, f2, f3, f4 = st.columns(4)
+    f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
     
     # Filtro Tecnico: Solo Admin e PM scelgono, Operatore vede solo i suoi
     if ruolo in ["Admin", "PM"]:
@@ -589,34 +562,34 @@ elif scelta == "📋 Gestione Task":
         f1.write(f"**Tecnico:** {nome_u}")
 
     sel_com = f2.selectbox("Filtra Commessa", ["Tutte"] + [cm.get('codice') for cm in cs])
-    sel_sta = f3.selectbox("Filtra Stato", ["In corso", "Bloccato", "Completato", "Tutti"], index=0)
-    mostra_chiusi = f4.checkbox("Mostra Completati", value=False)
+    opzioni_stato = [
+        "In corso (incl. bloccati)",
+        "In corso (solo non bloccati)",
+        "Bloccato",
+        "Completato",
+        "Tutti"
+    ]
+    sel_sta = f3.selectbox("Filtra Stato", opzioni_stato, index=0)
+    limite_visualizzazione = f4.number_input("Max task da mostrare", min_value=20, max_value=500, value=120, step=20)
 
-    # --- LOGICA FILTRO ---
-    f_t = ts
-    # 1. Filtro Tecnico
-    if sel_tec != "Tutti": 
-        f_t = [t for t in f_t if t.get('assegnato_a') == sel_tec]
-    # 2. Filtro Commessa
-    if sel_com != "Tutte": 
-        f_t = [t for t in f_t if t.get('commessa_ref') == sel_com]
-    # 3. Filtro Stato e Chiusi
-    if not mostra_chiusi:
-        f_t = [t for t in f_t if t.get('stato') != 'Completato']
-    elif sel_sta != "Tutti":
-        f_t = [t for t in f_t if t.get('stato') == sel_sta]
+    # --- LOGICA FILTRO (SERVER-SIDE SU SUPABASE) ---
+    filtri = {}
 
-    # --- ORDINAMENTO CRONOLOGICO (Scaduti e Imminenti prima) ---
-    def calcola_priorita(task):
-        try:
-            d = date.fromisoformat(task.get('scadenza'))
-            return d
-        except:
-            return date(9999, 12, 31)
+    if sel_tec != "Tutti":
+        filtri["assegnato_a"] = f"eq.{sel_tec}"
 
-    f_t.sort(key=calcola_priorita)
+    if sel_com != "Tutte":
+        filtri["commessa_ref"] = f"eq.{sel_com}"
 
-    # --- VISUALIZZAZIONE TASK ---
+    if sel_sta == "In corso (incl. bloccati)":
+        filtri["or"] = "(stato.eq.In corso,stato.eq.Bloccato)"
+    elif sel_sta == "In corso (solo non bloccati)":
+        filtri["stato"] = "eq.In corso"
+    elif sel_sta in ["Bloccato", "Completato"]:
+        filtri["stato"] = f"eq.{sel_sta}"
+
+    f_t = db_get("task", filtri=filtri, order="scadenza.asc.nullslast", limit=limite_visualizzazione)
+
     if not f_t:
         st.info("Nessun task trovato con questi filtri.")
     
@@ -876,5 +849,4 @@ elif scelta == "🎯 Assegnazione":
                         st.rerun() # Ricarica per mostrare i valori salvati
                     else:
                         st.error("Errore creazione task.")
-
 
