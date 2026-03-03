@@ -71,37 +71,6 @@ FROM information_schema.columns
 WHERE table_name = 'task' AND column_name = 'motivazione_blocco';
 ```
 
-## Migrazione utenti: campo interno/esterno
-Per abilitare la classificazione utenti **Interno/Esterno** (usata nel nuovo tool Admin), esegui:
-
-1. Apri Supabase → **SQL Editor**.
-2. Crea una nuova query.
-3. Incolla il contenuto di `db_migrazione_utenti_interno_esterno.sql`.
-4. Esegui la query.
-
-Verifica rapida:
-
-```sql
-SELECT column_name, data_type, is_nullable, column_default
-FROM information_schema.columns
-WHERE table_name = 'utenti' AND column_name = 'interno_esterno';
-```
-
-e:
-
-```sql
-SELECT interno_esterno, COUNT(*)
-FROM utenti
-GROUP BY interno_esterno
-ORDER BY interno_esterno;
-```
-
-Atteso:
-- colonna `interno_esterno` presente su `utenti`;
-- `NOT NULL`;
-- default `Interno`;
-- valori ammessi solo `Interno`/`Esterno`.
-
 ## Configurazione manuale notifiche email
 Aggiungi in `.streamlit/secrets.toml` (o variabili ambiente) i seguenti parametri:
 
@@ -167,3 +136,18 @@ Se il task è già `Bloccato` e viene salvato di nuovo, l'app evita invii duplic
 - È disponibile la ricerca per **codice**, **cliente** e **PM**.
 - Il PM incaricato è visibile direttamente nella card/expander commessa.
 - Ordinamento di default: commesse più recenti prima (se esiste un timestamp `created_at` o equivalente), altrimenti ordinamento per prefisso numerico del codice commessa in ordine decrescente.
+
+
+## Struttura contenuto email blocco
+La mail contiene sempre un riepilogo schematico iniziale:
+- Task
+- Tecnico
+- PM incaricato
+- Data/Ora
+- Motivazione
+
+Segue una sezione **Indicazioni operative** generata dall'AI, contestualizzata per il PM responsabile della commessa.
+
+## Destinatari notifica blocco
+- 1 solo PM: quello assegnato nella commessa (`pm_assegnato`)
+- 1 solo Admin: `NOTIFY_ADMIN_EMAIL` se valorizzata, altrimenti primo Admin disponibile
