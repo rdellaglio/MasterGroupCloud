@@ -701,12 +701,26 @@ elif scelta == "📊 Analisi Commesse":
     cs, ts = db_get("commesse"), db_get("task")
     oggi = date.today()
 
-    filtro_stato = st.selectbox("Filtra stato commessa", ["Tutti", "Aperto", "Bloccato", "Concluso"], index=0)
+    c_fil1, c_fil2 = st.columns([1, 2])
+    filtro_stato = c_fil1.selectbox("Filtra stato commessa", ["Tutti", "Aperto", "Bloccato", "Concluso"], index=0)
+    query_cerca = c_fil2.text_input("🔎 Cerca commessa (codice, cliente, PM)").strip().lower()
+
     if filtro_stato != "Tutti":
         cs = [c for c in cs if c.get('stato', 'Aperto') == filtro_stato]
 
+    if query_cerca:
+        cs = [
+            c for c in cs
+            if query_cerca in str(c.get("codice", "")).lower()
+            or query_cerca in str(c.get("cliente", "")).lower()
+            or query_cerca in str(c.get("pm_assegnato", "")).lower()
+        ]
+
+    # Default: commesse più recenti prima (se c'è timestamp), altrimenti prefisso numerico codice desc.
+    cs = sorted(cs, key=chiave_ordinamento_commessa_desc, reverse=True)
+
     if not cs:
-        st.info("Nessuna commessa trovata con questo filtro.")
+        st.info("Nessuna commessa trovata con questo filtro/ricerca.")
 
     for c in cs:
         t_comm = [t for t in ts if t.get('commessa_ref') == c.get('codice')]
@@ -720,9 +734,11 @@ elif scelta == "📊 Analisi Commesse":
         chiusi = len([t for t in t_comm if t['stato'] == 'Completato'])
         perc = (chiusi / len(t_comm) * 100) if t_comm else 0
         icona_commessa = icona_stato_commessa(stato_commessa)
-        with st.expander(f"{icona_commessa} {c['codice']} - {c['cliente']} | Stato: {stato_commessa} ({int(perc)}%)"):
+        pm_commessa = c.get("pm_assegnato") or "Non assegnato"
+        with st.expander(f"{icona_commessa} {c['codice']} - {c['cliente']} | PM: {pm_commessa} | Stato: {stato_commessa} ({int(perc)}%)"):
             if ruolo == "Admin":
                 st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
+            st.write(f"👤 PM incaricato: **{pm_commessa}**")
             st.write(f"📌 Stato commessa: **{icona_commessa} {stato_commessa}**")
             st.progress(perc / 100)
             for tc in t_comm:
@@ -763,7 +779,7 @@ elif scelta == "🎯 Assegnazione":
             
             # --- SELEZIONE PM (Filtro per Ruolo) ---
             # Filtriamo gli utenti qualificati come PM o Admin dall'elenco 'us' caricato a inizio sezione
-            elenco_pm = [usr.get('nome') for usr in us if usr.get('ruolo') in ['PM', 'Admin']]
+            elenco_pm = [usr.get('nome') for usr in us if usr.get('ruolo') == 'PM']
             sel_pm = st.selectbox("Seleziona PM Responsabile", elenco_pm)
             
             if st.form_submit_button("Crea Commessa"):

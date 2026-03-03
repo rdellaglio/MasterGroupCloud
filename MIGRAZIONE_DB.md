@@ -81,6 +81,8 @@ SMTP_USER = "noreply@tuodominio.it"
 SMTP_PASSWORD = "<password-o-app-password>"
 SMTP_FROM = "noreply@tuodominio.it"
 SMTP_USE_TLS = true
+# opzionale: forza un solo admin destinatario
+NOTIFY_ADMIN_EMAIL = "admin@tuodominio.it"
 ```
 
 > Nota: i destinatari vengono presi automaticamente dalla tabella `utenti`:
@@ -128,3 +130,9 @@ Se AI non è configurata, il sistema invia testo fallback statico.
 ## Routine invio mail blocco task
 La notifica email parte automaticamente **solo quando il task passa da uno stato diverso a `Bloccato`**.
 Se il task è già `Bloccato` e viene salvato di nuovo, l'app evita invii duplicati.
+
+
+## Ricerca e ordinamento in Analisi Commesse
+- È disponibile la ricerca per **codice**, **cliente** e **PM**.
+- Il PM incaricato è visibile direttamente nella card/expander commessa.
+- Ordinamento di default: commesse più recenti prima (se esiste un timestamp `created_at` o equivalente), altrimenti ordinamento per prefisso numerico del codice commessa in ordine decrescente.
