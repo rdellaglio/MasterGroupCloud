@@ -5,7 +5,6 @@ import os
 import json
 import secrets
 import string
-import re
 from email.mime.text import MIMEText
 from datetime import date, datetime
 from urllib.parse import urlencode
@@ -192,6 +191,10 @@ def errore_colonna_mancante(res, colonna_attesa):
         and "PGRST204" in payload_text
         and colonna_attesa in payload_text
     )
+
+def genera_password_temporanea(lunghezza=12):
+    alfabeti = string.ascii_letters + string.digits + "!@#$%"
+    return "".join(secrets.choice(alfabeti) for _ in range(lunghezza))
 
 def calcola_stato_commessa(task_commessa):
     if not task_commessa:
@@ -392,7 +395,7 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
     pm_nome = commessa.get("pm_assegnato") if commessa else None
     pm_email = None
 
-    admin_users = [u for u in utenti if u.get("ruolo") == "Admin"]
+    admin_users = [u for u in utenti if str(u.get("ruolo", "")).strip().lower() == "admin"]
     destinatari = set()
     if pm_nome:
         pm_user = next((u for u in utenti if u.get("nome") == pm_nome), None)
@@ -495,6 +498,9 @@ if "u" not in st.session_state:
 
 u = st.session_state.u
 ruolo, nome_u = u.get('ruolo'), u.get('nome')
+ruolo_norm = str(ruolo or '').strip().lower()
+is_admin = ruolo_norm == 'admin'
+is_pm = ruolo_norm == 'pm'
 
 # ==========================================
 # [04] SIDEBAR & NAVIGAZIONE
@@ -504,8 +510,8 @@ st.sidebar.write(f"👤 **{nome_u}**")
 st.sidebar.divider()
 
 menu = ["🏠 Dashboard", "📋 Gestione Task"]
-if ruolo in ["Admin", "PM"]: menu.extend(["📊 Analisi Commesse", "🎯 Assegnazione"])
-if ruolo == "Admin": menu.append("👥 Gestione Utenti")
+if is_admin or is_pm: menu.extend(["📊 Analisi Commesse", "🎯 Assegnazione"])
+if is_admin: menu.append("👥 Gestione Utenti")
 
 scelta = st.sidebar.radio("Navigazione", menu)
 if st.sidebar.button("Logout"):
@@ -554,7 +560,7 @@ if scelta == "🏠 Dashboard":
     col2.metric("Scadenze imminenti (3gg)", imminenti, delta_color="inverse" if imminenti > 0 else "normal")
     col3.metric("Task scaduti", len(scaduti_task), delta_color="inverse" if len(scaduti_task) > 0 else "normal")
     
-    if ruolo == "Admin":
+    if is_admin:
         cs = db_get("commesse")
         tot_b = sum(float(c.get('budget', 0)) for c in cs)
         bud_bloccate = sum(float(c.get('budget', 0)) for c in cs if c.get('stato') == 'Bloccato')
@@ -591,7 +597,7 @@ elif scelta == "📋 Gestione Task":
     f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
     
     # Filtro Tecnico: Solo Admin e PM scelgono, Operatore vede solo i suoi
-    if ruolo in ["Admin", "PM"]:
+    if is_admin or is_pm:
         sel_tec = f1.selectbox("Filtra Tecnico", ["Tutti"] + [usr.get('nome') for usr in us])
     else:
         sel_tec = nome_u
@@ -650,7 +656,7 @@ elif scelta == "📋 Gestione Task":
             st.write(f"**Assegnato a:** {t.get('assegnato_a')}")
             
             # 🛠️ RIASSEGNAZIONE (SOLO ADMIN)
-            if ruolo == "Admin":
+            if is_admin:
                 st.divider()
                 st.subheader("🛠️ Modifica Avanzata (Admin)")
                 l_nomi = [usr.get('nome') for usr in us]
@@ -772,7 +778,7 @@ elif scelta == "📊 Analisi Commesse":
         icona_commessa = icona_stato_commessa(stato_commessa)
         pm_commessa = c.get("pm_assegnato") or "Non assegnato"
         with st.expander(f"{icona_commessa} {c['codice']} - {c['cliente']} | PM: {pm_commessa} | Stato: {stato_commessa} ({int(perc)}%)"):
-            if ruolo == "Admin":
+            if is_admin:
                 st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
             st.write(f"👤 PM incaricato: **{pm_commessa}**")
             st.write(f"📌 Stato commessa: **{icona_commessa} {stato_commessa}**")
@@ -815,7 +821,7 @@ elif scelta == "🎯 Assegnazione":
             
             # --- SELEZIONE PM (Filtro per Ruolo) ---
             # Filtriamo gli utenti qualificati come PM o Admin dall'elenco 'us' caricato a inizio sezione
-            elenco_pm = [usr.get('nome') for usr in us if usr.get('ruolo') == 'PM']
+            elenco_pm = [usr.get('nome') for usr in us if str(usr.get('ruolo', '')).strip().lower() in ['pm', 'admin']]
             sel_pm = st.selectbox("Seleziona PM Responsabile", elenco_pm)
             
             if st.form_submit_button("Crea Commessa"):
@@ -898,3 +904,62 @@ elif scelta == "👥 Gestione Utenti":
 
     if "pwd_temp_admin" not in st.session_state:
         st.session_state.pwd_temp_admin = genera_password_temporanea()
+
+    c_pwd, c_hint = st.columns([1, 1])
+    if c_pwd.button("🔐 Genera password temporanea"):
+        st.session_state.pwd_temp_admin = genera_password_temporanea()
+    c_hint.info("Suggerimento: comunica la password via canale separato e falla cambiare al primo accesso.")
+
+    with st.form("form_nuovo_utente", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        nome_nuovo = c1.text_input("Nome e Cognome")
+        email_nuova = c2.text_input("Email aziendale").strip().lower()
+
+        c3, c4 = st.columns(2)
+        ruolo_nuovo = c3.selectbox("Ruolo", ["Operatore", "PM", "Admin"])
+        tipologia_nuova = c4.selectbox("Tipologia", ["Interno", "Esterno"])
+
+        password_nuova = st.text_input("Password iniziale", value=st.session_state.pwd_temp_admin)
+
+        if st.form_submit_button("➕ Crea utente"):
+            if not nome_nuovo or not email_nuova or not password_nuova:
+                st.warning("Compila Nome, Email e Password.")
+            elif any(str(u.get("email", "")).lower() == email_nuova for u in utenti):
+                st.warning("Email già presente. Usa un altro indirizzo.")
+            else:
+                payload_utente = {
+                    "nome": nome_nuovo.strip(),
+                    "email": email_nuova,
+                    "password": password_nuova,
+                    "ruolo": ruolo_nuovo,
+                    "interno_esterno": tipologia_nuova,
+                }
+                res_u = db_insert("utenti", payload_utente)
+
+                if res_u.status_code in [200, 201]:
+                    st.success(f"✅ Utente {nome_nuovo} creato correttamente.")
+                    st.session_state.pwd_temp_admin = genera_password_temporanea()
+                    st.rerun()
+                elif errore_colonna_mancante(res_u, "interno_esterno"):
+                    payload_fallback = dict(payload_utente)
+                    payload_fallback.pop("interno_esterno", None)
+                    res_fallback = db_insert("utenti", payload_fallback)
+                    if res_fallback.status_code in [200, 201]:
+                        st.warning(
+                            "Utente creato, ma il campo 'interno_esterno' non è stato salvato. "
+                            "Applica la migrazione `db_migrazione_utenti_interno_esterno.sql`."
+                        )
+                        st.rerun()
+                    else:
+                        st.error(f"Errore creazione utente: {res_fallback.text}")
+                else:
+                    st.error(f"Errore creazione utente: {res_u.text}")
+
+    st.divider()
+    st.subheader("Elenco utenti")
+    if not utenti:
+        st.info("Nessun utente presente nel database.")
+    else:
+        for usr in utenti:
+            tag_tipo = usr.get("interno_esterno") or "(non impostato)"
+            st.write(f"- **{usr.get('nome')}** · {usr.get('ruolo')} · {tag_tipo} · {usr.get('email')}")
