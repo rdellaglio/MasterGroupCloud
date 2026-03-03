@@ -1,6 +1,8 @@
 import streamlit as st
 import httpx
-from datetime import date
+import smtplib
+from email.mime.text import MIMEText
+from datetime import date, datetime
 # REV 01.05
 # ==========================================
 # [01] CONFIGURAZIONE & BRANDING
@@ -105,14 +107,13 @@ def db_get(tabella):
     try:
         res = httpx.get(f"{URL}/rest/v1/{tabella}?select=*", headers=HEADERS, timeout=10)
         return res.json() if res.status_code == 200 else []
-    except httpx.HTTPError:
-        return []
+    except: return []
 
 def db_update(tabella, id_riga, payload):
-    return httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload, timeout=10)
+    return httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload)
 
 def db_insert(tabella, payload):
-    return httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload, timeout=10)
+    return httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload)
 
 # ==========================================
 # [03] ACCESSO (LOGIN)
@@ -233,10 +234,10 @@ elif scelta == "📋 Gestione Task":
     if sel_com != "Tutte": 
         f_t = [t for t in f_t if t.get('commessa_ref') == sel_com]
     # 3. Filtro Stato e Chiusi
-    if sel_sta != "Tutti":
-        f_t = [t for t in f_t if t.get('stato') == sel_sta]
-    elif not mostra_chiusi:
+    if not mostra_chiusi:
         f_t = [t for t in f_t if t.get('stato') != 'Completato']
+    elif sel_sta != "Tutti":
+        f_t = [t for t in f_t if t.get('stato') == sel_sta]
 
     # --- ORDINAMENTO CRONOLOGICO (Scaduti e Imminenti prima) ---
     def calcola_priorita(task):
@@ -253,7 +254,6 @@ elif scelta == "📋 Gestione Task":
         st.info("Nessun task trovato con questi filtri.")
     
     for t in f_t:
-        d_scad = None
         try:
             d_scad = date.fromisoformat(t['scadenza'])
             diff = (d_scad - oggi).days
@@ -282,7 +282,7 @@ elif scelta == "📋 Gestione Task":
                 
                 c_u, c_d = st.columns(2)
                 nuovo_u = c_u.selectbox("Cambia Tecnico", l_nomi, index=idx_u, key=f"re_{t['id']}")
-                nuova_d = c_d.date_input("Cambia Scadenza", value=d_scad or oggi, key=f"sc_{t['id']}")
+                nuova_d = c_d.date_input("Cambia Scadenza", value=d_scad, key=f"sc_{t['id']}")
                 
                 if st.button("Salva modifiche Admin", key=f"btn_adm_{t['id']}"):
                     db_update("task", t['id'], {"assegnato_a": nuovo_u, "scadenza": str(nuova_d)})
@@ -309,9 +309,9 @@ elif scelta == "📊 Analisi Commesse":
     cs, ts = db_get("commesse"), db_get("task")
     for c in cs:
         t_comm = [t for t in ts if t.get('commessa_ref') == c.get('codice')]
-        chiusi = len([t for t in t_comm if t.get('stato') == 'Completato'])
+        chiusi = len([t for t in t_comm if t['stato'] == 'Completato'])
         perc = (chiusi / len(t_comm) * 100) if t_comm else 0
-        with st.expander(f"📂 {c.get('codice')} - {c.get('cliente')} ({int(perc)}%)"):
+        with st.expander(f"📂 {c['codice']} - {c['cliente']} ({int(perc)}%)"):
             if ruolo == "Admin": st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
             st.progress(perc / 100)
             for tc in t_comm:
