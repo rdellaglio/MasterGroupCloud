@@ -5,6 +5,7 @@ import os
 import json
 from email.mime.text import MIMEText
 from datetime import date, datetime
+from urllib.parse import urlencode
 # REV 01.05
 # ==========================================
 # [01] CONFIGURAZIONE & BRANDING
@@ -138,11 +139,21 @@ class DbResult:
     def json(self):
         return self._payload
 
-def db_get(tabella):
+@st.cache_data(ttl=30, show_spinner=False)
+def db_get(tabella, select="*", filtri=None, order=None, limit=None):
     if not DB_READY:
         return []
     try:
-        res = httpx.get(f"{URL}/rest/v1/{tabella}?select=*", headers=HEADERS, timeout=10)
+        params = {"select": select}
+        if filtri:
+            params.update(filtri)
+        if order:
+            params["order"] = order
+        if limit is not None:
+            params["limit"] = str(limit)
+
+        query = urlencode(params, doseq=True, safe=",().")
+        res = httpx.get(f"{URL}/rest/v1/{tabella}?{query}", headers=HEADERS, timeout=10)
         return res.json() if res.status_code == 200 else []
     except:
         return []
@@ -151,7 +162,9 @@ def db_update(tabella, id_riga, payload):
     if not DB_READY:
         return DbResult(text="DB non configurato. Imposta SUPABASE_URL e SUPABASE_KEY in secrets.toml.")
     try:
-        return httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload, timeout=10)
+        result = httpx.patch(f"{URL}/rest/v1/{tabella}?id=eq.{id_riga}", headers=HEADERS, json=payload, timeout=10)
+        db_get.clear()
+        return result
     except Exception as e:
         return DbResult(text=f"Errore update DB: {e}")
 
@@ -159,7 +172,9 @@ def db_insert(tabella, payload):
     if not DB_READY:
         return DbResult(text="DB non configurato. Imposta SUPABASE_URL e SUPABASE_KEY in secrets.toml.")
     try:
-        return httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload, timeout=10)
+        result = httpx.post(f"{URL}/rest/v1/{tabella}", headers=HEADERS, json=payload, timeout=10)
+        db_get.clear()
+        return result
     except Exception as e:
         return DbResult(text=f"Errore insert DB: {e}")
 
@@ -600,11 +615,11 @@ if scelta == "🏠 Dashboard":
 # ==========================================
 elif scelta == "📋 Gestione Task":
     st.header("Monitoraggio Attività")
-    ts, cs, us = db_get("task"), db_get("commesse"), db_get("utenti")
+    cs, us = db_get("commesse"), db_get("utenti")
     oggi = date.today()
 
     # --- FILTRI INCROCIATI ---
-    f1, f2, f3, f4 = st.columns(4)
+    f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
     
     # Filtro Tecnico: Solo Admin e PM scelgono, Operatore vede solo i suoi
     if ruolo in ["Admin", "PM"]:
@@ -614,34 +629,34 @@ elif scelta == "📋 Gestione Task":
         f1.write(f"**Tecnico:** {nome_u}")
 
     sel_com = f2.selectbox("Filtra Commessa", ["Tutte"] + [cm.get('codice') for cm in cs])
-    sel_sta = f3.selectbox("Filtra Stato", ["In corso", "Bloccato", "Completato", "Tutti"], index=0)
-    mostra_chiusi = f4.checkbox("Mostra Completati", value=False)
+    opzioni_stato = [
+        "In corso (incl. bloccati)",
+        "In corso (solo non bloccati)",
+        "Bloccato",
+        "Completato",
+        "Tutti"
+    ]
+    sel_sta = f3.selectbox("Filtra Stato", opzioni_stato, index=0)
+    limite_visualizzazione = f4.number_input("Max task da mostrare", min_value=20, max_value=500, value=120, step=20)
 
-    # --- LOGICA FILTRO ---
-    f_t = ts
-    # 1. Filtro Tecnico
-    if sel_tec != "Tutti": 
-        f_t = [t for t in f_t if t.get('assegnato_a') == sel_tec]
-    # 2. Filtro Commessa
-    if sel_com != "Tutte": 
-        f_t = [t for t in f_t if t.get('commessa_ref') == sel_com]
-    # 3. Filtro Stato e Chiusi
-    if not mostra_chiusi:
-        f_t = [t for t in f_t if t.get('stato') != 'Completato']
-    elif sel_sta != "Tutti":
-        f_t = [t for t in f_t if t.get('stato') == sel_sta]
+    # --- LOGICA FILTRO (SERVER-SIDE SU SUPABASE) ---
+    filtri = {}
 
-    # --- ORDINAMENTO CRONOLOGICO (Scaduti e Imminenti prima) ---
-    def calcola_priorita(task):
-        try:
-            d = date.fromisoformat(task.get('scadenza'))
-            return d
-        except:
-            return date(9999, 12, 31)
+    if sel_tec != "Tutti":
+        filtri["assegnato_a"] = f"eq.{sel_tec}"
 
-    f_t.sort(key=calcola_priorita)
+    if sel_com != "Tutte":
+        filtri["commessa_ref"] = f"eq.{sel_com}"
 
-    # --- VISUALIZZAZIONE TASK ---
+    if sel_sta == "In corso (incl. bloccati)":
+        filtri["or"] = "(stato.eq.In corso,stato.eq.Bloccato)"
+    elif sel_sta == "In corso (solo non bloccati)":
+        filtri["stato"] = "eq.In corso"
+    elif sel_sta in ["Bloccato", "Completato"]:
+        filtri["stato"] = f"eq.{sel_sta}"
+
+    f_t = db_get("task", filtri=filtri, order="scadenza.asc.nullslast", limit=limite_visualizzazione)
+
     if not f_t:
         st.info("Nessun task trovato con questi filtri.")
     
