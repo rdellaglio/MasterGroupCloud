@@ -349,20 +349,41 @@ def ai_chat_completion(system_prompt, user_payload, temperature=0.4, timeout=12)
         return None
 
 def genera_testo_mail_blocco_ai(evento):
+    intestazione = (
+        "RIEPILOGO BLOCCO TASK\n"
+        "------------------------------\n"
+        f"Commessa        : {evento.get('commessa_codice')}\n"
+        f"Cliente         : {evento.get('commessa_cliente')}\n"
+        f"Task            : {evento.get('task_descrizione')}\n"
+        f"Operatore       : {evento.get('tecnico')}\n"
+        f"Data segnalazione: {evento.get('data_evento')}\n"
+        f"Motivazione     : {evento.get('motivazione')}\n"
+        "------------------------------\n\n"
+    )
+
     fallback = (
-        f"È stato segnalato un blocco operativo sulla commessa {evento.get('commessa_codice')}.\n\n"
-        f"Task: {evento.get('task_descrizione')}\n"
-        f"Tecnico: {evento.get('tecnico')}\n"
-        f"Data: {evento.get('data_evento')}\n"
-        f"Motivazione: {evento.get('motivazione')}\n\n"
-        "Si richiede presa in carico del blocco e definizione delle azioni correttive."
+        intestazione
+        + "Gentile Project Manager,\n\n"
+        + f"con la presente l'operatore {evento.get('tecnico')} segnala che il task sopra indicato "
+        + "risulta bloccato e non è possibile procedere con le attività pianificate. "
+        + "La motivazione è riportata nel riepilogo.\n\n"
+        + "Per favorire lo sblocco si suggerisce di: validare eventuali dipendenze aperte, "
+        + "confermare priorità e autorizzazioni mancanti, e fornire un riscontro operativo "
+        + "sulle prossime azioni da intraprendere.\n\n"
+        + "Resto a disposizione per aggiornamenti."
     )
 
     system_prompt = (
-        "Sei un assistente per comunicazioni aziendali. Scrivi un'email in italiano, tono professionale e operativo, "
-        "max 160 parole, senza markdown, con: riepilogo evento, impatto e prossimi passi consigliati."
+        "Sei un assistente per comunicazioni aziendali. Restituisci solo il corpo email in italiano, "
+        "tono professionale e operativo, senza markdown. La mail deve essere inviata dall'operatore "
+        "al Project Manager per segnalare il blocco del lavoro. "
+        "Struttura obbligatoria: "
+        "1) apertura con una tabella testuale di riepilogo (stesso formato key:value su più righe), "
+        "2) spiegazione sintetica del blocco e dell'impatto, "
+        "3) proposta concreta di azioni per sblocco. "
+        "Massimo 220 parole."
     )
-    content = ai_chat_completion(system_prompt, json.dumps(evento, ensure_ascii=False), temperature=0.4, timeout=12)
+    content = ai_chat_completion(system_prompt, json.dumps(evento, ensure_ascii=False), temperature=0.3, timeout=12)
     return content or fallback
 
 def invia_mail_blocco(destinatari, oggetto, corpo):
@@ -392,19 +413,12 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
     pm_nome = commessa.get("pm_assegnato") if commessa else None
     pm_email = None
 
-    admin_users = [u for u in utenti if u.get("ruolo") == "Admin"]
     destinatari = set()
     if pm_nome:
         pm_user = next((u for u in utenti if u.get("nome") == pm_nome), None)
         if pm_user and pm_user.get("email"):
             pm_email = pm_user.get("email")
             destinatari.add(pm_email)
-    admin_emails = []
-    for adm in admin_users:
-        if adm.get("email"):
-            email = adm.get("email")
-            admin_emails.append(email)
-            destinatari.add(email)
 
     # Formato oggetto richiesto: nome commessa - Attività in Blocco - nome tecnico
     nome_commessa = task.get("commessa_ref") or (commessa.get("cliente") if commessa else "N/D")
@@ -420,8 +434,7 @@ def notifica_blocco_task(task, commesse, utenti, motivazione):
     corpo = genera_testo_mail_blocco_ai(evento)
     ok, msg = invia_mail_blocco(sorted(destinatari), oggetto, corpo)
     if ok:
-        admin_email = ", ".join(sorted(set(admin_emails))) if admin_emails else None
-        dettaglio = f" Destinatari: PM={pm_email or 'N/D'}, Admin={admin_email or 'N/D'}."
+        dettaglio = f" Destinatario PM={pm_email or 'N/D'}."
         return True, msg + dettaglio
     return False, msg
 

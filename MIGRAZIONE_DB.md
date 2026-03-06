@@ -139,15 +139,17 @@ Se il task è già `Bloccato` e viene salvato di nuovo, l'app evita invii duplic
 
 
 ## Struttura contenuto email blocco
-La mail contiene sempre un riepilogo schematico iniziale:
+La mail contiene sempre un riepilogo tabellare iniziale con i dati minimi utili al PM:
+- Commessa
+- Cliente
 - Task
-- Tecnico
-- PM incaricato
-- Data/Ora
-- Motivazione
+- Operatore
+- Data/Ora segnalazione
+- Motivazione del blocco
 
-Segue una sezione **Indicazioni operative** generata dall'AI, contestualizzata per il PM responsabile della commessa.
+Segue una comunicazione sintetica in stile operatore → PM con:
+- impatto operativo del blocco
+- proposta di azioni concrete per lo sblocco
 
 ## Destinatari notifica blocco
 - 1 solo PM: quello assegnato nella commessa (`pm_assegnato`)
-- 1 solo Admin: `NOTIFY_ADMIN_EMAIL` se valorizzata, altrimenti primo Admin disponibile
