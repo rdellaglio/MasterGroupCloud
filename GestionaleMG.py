@@ -261,6 +261,14 @@ def costo_totale_task(task, utenti_index):
         return ore_cons * costo_orario_utente(assegnato, utenti_index)
     return float(task.get("costo_task_esterno", 0) or 0)
 
+
+def costo_previsionale_task(task, utenti_index):
+    assegnato = task.get("assegnato_a")
+    if utente_e_interno(assegnato, utenti_index):
+        ore_stimate = float(task.get("stima_ore_interne", 0) or 0)
+        return ore_stimate * costo_orario_utente(assegnato, utenti_index)
+    return float(task.get("costo_task_esterno", 0) or 0)
+
 def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     commesse = commesse_cache if commesse_cache is not None else db_get("commesse")
     tasks = task_cache if task_cache is not None else db_get("task")
@@ -705,12 +713,10 @@ elif scelta == "📋 Gestione Task":
             assegnato_interno = utente_e_interno(assegnato, us_index)
 
             st.divider()
-            st.subheader("💶 Rendicontazione costo")
             if assegnato_interno:
-                costo_h = costo_orario_utente(assegnato, us_index)
+                st.subheader("⏱️ Rendicontazione ore interne")
                 ore_cons_attuali = float(t.get("ore_consuntive_interne", 0) or 0)
-                st.caption(f"Operatore interno · Costo orario: € {costo_h:,.2f}")
-                st.write(f"Costo task attuale: **€ {ore_cons_attuali * costo_h:,.2f}**")
+                st.caption("Operatore interno · rendicontazione a ore")
 
                 puo_rendicontare = ruolo in ["Admin", "PM"] or assegnato == nome_u
                 if puo_rendicontare:
@@ -731,6 +737,7 @@ elif scelta == "📋 Gestione Task":
                 else:
                     st.info("Solo Admin/PM o l'operatore assegnato può aggiornare le ore interne.")
             else:
+                st.subheader("💶 Gestione costo task esterno")
                 costo_esterno = float(t.get("costo_task_esterno", 0) or 0)
                 st.caption("Operatore esterno/contratto · Nessun timesheet richiesto")
                 st.write(f"Costo task esterno: **€ {costo_esterno:,.2f}**")
@@ -875,13 +882,17 @@ elif scelta == "📊 Analisi Commesse":
         icona_commessa = icona_stato_commessa(stato_commessa)
         pm_commessa = c.get("pm_assegnato") or "Non assegnato"
         with st.expander(f"{icona_commessa} {c['codice']} - {c['cliente']} | PM: {pm_commessa} | Stato: {stato_commessa} ({int(perc)}%)"):
+            costo_commessa = sum(costo_totale_task(tc, us_index) for tc in t_comm)
+            costo_previsionale = sum(costo_previsionale_task(tc, us_index) for tc in t_comm)
+
             if ruolo == "Admin":
                 st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
+                st.write(f"💶 Costo totale commessa (interni + esterni): **€ {costo_commessa:,.2f}**")
             st.write(f"👤 PM incaricato: **{pm_commessa}**")
             st.write(f"📌 Stato commessa: **{icona_commessa} {stato_commessa}**")
-
-            costo_commessa = sum(costo_totale_task(tc, us_index) for tc in t_comm)
-            st.write(f"💶 Costo totale commessa (interni + esterni): **€ {costo_commessa:,.2f}**")
+            st.write(
+                f"📈 Totale costo previsionale (stima interni + task esterni): **€ {costo_previsionale:,.2f}**"
+            )
 
             st.progress(perc / 100)
             for tc in t_comm:
