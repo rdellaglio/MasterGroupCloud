@@ -153,3 +153,39 @@ Segue una comunicazione sintetica in stile operatore → PM con:
 
 ## Destinatari notifica blocco
 - 1 solo PM: quello assegnato nella commessa (`pm_assegnato`)
+
+
+## Migrazione controllo gestione base (interni a ore, esterni a costo task)
+Per abilitare il modello richiesto:
+- operatori **interni** rendicontati a ore (costo orario);
+- operatori **esterni/contratto** valorizzati a costo task;
+
+esegui la migrazione:
+
+1. Apri Supabase → **SQL Editor**.
+2. Crea una nuova query.
+3. Incolla il contenuto di `db_migrazione_controllo_gestione_base.sql`.
+4. Esegui la query.
+
+### Cosa aggiunge
+- `utenti.costo_orario`
+- `task.stima_ore_interne`
+- `task.ore_consuntive_interne`
+- `task.costo_task_esterno`
+
+### Verifica rapida
+```sql
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'utenti'
+  AND column_name IN ('costo_orario')
+ORDER BY column_name;
+```
+
+```sql
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'task'
+  AND column_name IN ('stima_ore_interne', 'ore_consuntive_interne', 'costo_task_esterno')
+ORDER BY column_name;
+```

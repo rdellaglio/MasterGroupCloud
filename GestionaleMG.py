@@ -232,6 +232,35 @@ def etichetta_scadenza(task, oggi):
     except:
         return "❓ Scadenza non definita"
 
+
+def indicizza_utenti_per_nome(utenti):
+    return {
+        str(u.get("nome")): u
+        for u in (utenti or [])
+        if str(u.get("nome", "")).strip()
+    }
+
+
+def utente_e_interno(nome_utente, utenti_index):
+    u = utenti_index.get(str(nome_utente), {})
+    return str(u.get("interno_esterno", "Interno")).lower() == "interno"
+
+
+def costo_orario_utente(nome_utente, utenti_index):
+    u = utenti_index.get(str(nome_utente), {})
+    try:
+        return float(u.get("costo_orario", 0) or 0)
+    except Exception:
+        return 0.0
+
+
+def costo_totale_task(task, utenti_index):
+    assegnato = task.get("assegnato_a")
+    if utente_e_interno(assegnato, utenti_index):
+        ore_cons = float(task.get("ore_consuntive_interne", 0) or 0)
+        return ore_cons * costo_orario_utente(assegnato, utenti_index)
+    return float(task.get("costo_task_esterno", 0) or 0)
+
 def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     commesse = commesse_cache if commesse_cache is not None else db_get("commesse")
     tasks = task_cache if task_cache is not None else db_get("task")
@@ -608,6 +637,7 @@ if scelta == "🏠 Dashboard":
 elif scelta == "📋 Gestione Task":
     st.header("Monitoraggio Attività")
     cs, us = db_get("commesse"), db_get("utenti")
+    us_index = indicizza_utenti_per_nome(us)
     oggi = date.today()
 
     # --- FILTRI INCROCIATI ---
@@ -671,6 +701,55 @@ elif scelta == "📋 Gestione Task":
         
         with st.expander(titolo_expander):
             st.write(f"**Assegnato a:** {t.get('assegnato_a')}")
+            assegnato = t.get("assegnato_a")
+            assegnato_interno = utente_e_interno(assegnato, us_index)
+
+            st.divider()
+            st.subheader("💶 Rendicontazione costo")
+            if assegnato_interno:
+                costo_h = costo_orario_utente(assegnato, us_index)
+                ore_cons_attuali = float(t.get("ore_consuntive_interne", 0) or 0)
+                st.caption(f"Operatore interno · Costo orario: € {costo_h:,.2f}")
+                st.write(f"Costo task attuale: **€ {ore_cons_attuali * costo_h:,.2f}**")
+
+                puo_rendicontare = ruolo in ["Admin", "PM"] or assegnato == nome_u
+                if puo_rendicontare:
+                    ore_cons_nuove = st.number_input(
+                        "Ore consuntive interne",
+                        min_value=0.0,
+                        step=0.5,
+                        value=ore_cons_attuali,
+                        key=f"ore_cons_{t['id']}"
+                    )
+                    if st.button("Salva rendicontazione interna", key=f"btn_ore_cons_{t['id']}"):
+                        res_cons = db_update("task", t["id"], {"ore_consuntive_interne": ore_cons_nuove})
+                        if res_cons.status_code in [200, 204]:
+                            st.success("Rendicontazione ore interne aggiornata.")
+                            st.rerun()
+                        else:
+                            st.error(f"Errore aggiornamento rendicontazione: {res_cons.text}")
+                else:
+                    st.info("Solo Admin/PM o l'operatore assegnato può aggiornare le ore interne.")
+            else:
+                costo_esterno = float(t.get("costo_task_esterno", 0) or 0)
+                st.caption("Operatore esterno/contratto · Nessun timesheet richiesto")
+                st.write(f"Costo task esterno: **€ {costo_esterno:,.2f}**")
+
+                if ruolo in ["Admin", "PM"]:
+                    costo_esterno_new = st.number_input(
+                        "Aggiorna costo task esterno",
+                        min_value=0.0,
+                        step=50.0,
+                        value=costo_esterno,
+                        key=f"costo_ext_{t['id']}"
+                    )
+                    if st.button("Salva costo task esterno", key=f"btn_costo_ext_{t['id']}"):
+                        res_ce = db_update("task", t["id"], {"costo_task_esterno": costo_esterno_new})
+                        if res_ce.status_code in [200, 204]:
+                            st.success("Costo task esterno aggiornato.")
+                            st.rerun()
+                        else:
+                            st.error(f"Errore aggiornamento costo task esterno: {res_ce.text}")
             
             # 🛠️ RIASSEGNAZIONE (SOLO ADMIN)
             if ruolo == "Admin":
@@ -757,7 +836,8 @@ elif scelta == "📋 Gestione Task":
 # ==========================================
 elif scelta == "📊 Analisi Commesse":
     st.header("Avanzamento Progetti")
-    cs, ts = db_get("commesse"), db_get("task")
+    cs, ts, us = db_get("commesse"), db_get("task"), db_get("utenti")
+    us_index = indicizza_utenti_per_nome(us)
     oggi = date.today()
 
     c_fil1, c_fil2 = st.columns([1, 2])
@@ -799,6 +879,10 @@ elif scelta == "📊 Analisi Commesse":
                 st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
             st.write(f"👤 PM incaricato: **{pm_commessa}**")
             st.write(f"📌 Stato commessa: **{icona_commessa} {stato_commessa}**")
+
+            costo_commessa = sum(costo_totale_task(tc, us_index) for tc in t_comm)
+            st.write(f"💶 Costo totale commessa (interni + esterni): **€ {costo_commessa:,.2f}**")
+
             st.progress(perc / 100)
             for tc in t_comm:
                 stato_task = tc.get('stato')
@@ -815,6 +899,7 @@ elif scelta == "📊 Analisi Commesse":
 elif scelta == "🎯 Assegnazione":
     st.header("Pianificazione Nuove Attività")
     ts, cs, us = db_get("task"), db_get("commesse"), db_get("utenti")
+    us_index = indicizza_utenti_per_nome(us)
     
     # Inizializzazione Memoria (Session State) se vuota
     if "last_comm" not in st.session_state: st.session_state.last_comm = None
@@ -880,6 +965,17 @@ elif scelta == "🎯 Assegnazione":
                 t_desc = st.selectbox("Tipo Attività", TASK_STANDARD, index=idx_d)
                 t_tec = st.selectbox("Assegna Tecnico", l_tecnici, index=idx_t)
                 t_scad_task = st.date_input("Data Scadenza Task", value=st.session_state.last_date)
+
+                tecnico_interno = utente_e_interno(t_tec, us_index)
+                stima_ore_interne = 0.0
+                costo_task_esterno = 0.0
+                if tecnico_interno:
+                    costo_h = costo_orario_utente(t_tec, us_index)
+                    st.caption(f"Operatore interno · costo orario € {costo_h:,.2f}")
+                    stima_ore_interne = st.number_input("Stima ore interne", min_value=0.0, step=0.5, value=1.0)
+                else:
+                    st.caption("Operatore esterno/contratto · inserisci costo task")
+                    costo_task_esterno = st.number_input("Costo task esterno (€)", min_value=0.0, step=50.0, value=0.0)
                 
                 if st.form_submit_button("Invia Task"):
                     # Salvataggio in memoria per il prossimo task
@@ -897,7 +993,16 @@ elif scelta == "🎯 Assegnazione":
                         except: pass
                     
                     # Inserimento
-                    res_t = db_insert("task", {"commessa_ref": t_comm_ref, "descrizione": t_desc, "assegnato_a": t_tec, "scadenza": str(t_scad_task), "stato": "In corso"})
+                    res_t = db_insert("task", {
+                        "commessa_ref": t_comm_ref,
+                        "descrizione": t_desc,
+                        "assegnato_a": t_tec,
+                        "scadenza": str(t_scad_task),
+                        "stato": "In corso",
+                        "stima_ore_interne": stima_ore_interne,
+                        "ore_consuntive_interne": 0,
+                        "costo_task_esterno": costo_task_esterno,
+                    })
                     
                     if res_t.status_code in [200, 201]:
                         sync_stato_commessa(t_comm_ref)
