@@ -18,6 +18,25 @@ WHERE stato IS NULL
 
 
 -- ================================================================
+-- 1.B VALORI DEFAULT TASK: normalizza campi importati a NULL
+--     Evita problemi con colonne NOT NULL e rende i task coerenti
+-- ================================================================
+UPDATE task
+SET
+    descrizione_libera = COALESCE(descrizione_libera, FALSE),
+    approvato_admin = COALESCE(approvato_admin, FALSE),
+    stima_ore_interne = COALESCE(stima_ore_interne, 0),
+    ore_consuntive_interne = COALESCE(ore_consuntive_interne, 0),
+    costo_task_esterno = COALESCE(costo_task_esterno, 0),
+    spese_task_excel = COALESCE(spese_task_excel, 0),
+    incarico_excel = COALESCE(incarico_excel, 0)
+WHERE commessa_ref IN (
+    '800','803','805','806','808','811','812',
+    '814','817','818','819','820','821','822','823','824'
+);
+
+
+-- ================================================================
 -- 2. ASSEGNATO_A: copia il primo assegnatario da assegnazioni_task
 --    Logica: id_task = 'T824_001' → commessa_ref='824', ordine_in_scheda=1
 --    Aggiorna solo i task che hanno almeno un'assegnazione registrata

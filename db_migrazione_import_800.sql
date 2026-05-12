@@ -28,6 +28,8 @@ ALTER TABLE commesse ADD COLUMN IF NOT EXISTS note                 TEXT;
 -- 2. ESTENSIONE TABELLA task
 -- =============================================================
 
+ALTER TABLE task ADD COLUMN IF NOT EXISTS id_commessa             TEXT;
+ALTER TABLE task ADD COLUMN IF NOT EXISTS codice_commessa         TEXT;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS ordine_in_scheda       INTEGER;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS id_prestazione_catalogo TEXT;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS descrizione_libera      BOOLEAN DEFAULT FALSE;
@@ -36,6 +38,12 @@ ALTER TABLE task ADD COLUMN IF NOT EXISTS approvato_admin         BOOLEAN DEFAUL
 ALTER TABLE task ADD COLUMN IF NOT EXISTS spese_task_excel        NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS incarico_excel          NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS note                    TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_task_id_commessa_800
+    ON task(id_commessa);
+
+CREATE INDEX IF NOT EXISTS idx_task_commessa_ordine_800
+    ON task(commessa_ref, ordine_in_scheda);
 
 
 -- =============================================================
@@ -190,7 +198,8 @@ CREATE INDEX IF NOT EXISTS idx_note_commessa_id_commessa
 -- WHERE table_name IN ('commesse','task')
 --   AND column_name IN (
 --       'titolo','oggetto','area_pratica','importo_contratto',
---       'ordine_in_scheda','id_prestazione_catalogo','priorita'
+--       'id_commessa','codice_commessa','ordine_in_scheda',
+--       'id_prestazione_catalogo','priorita'
 --   )
 -- ORDER BY table_name, column_name;
 --

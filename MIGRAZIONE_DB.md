@@ -71,6 +71,54 @@ FROM information_schema.columns
 WHERE table_name = 'task' AND column_name = 'motivazione_blocco';
 ```
 
+
+## Import Esportazione 800 (Supabase)
+Per caricare i dati reali 800-824 nel database Supabase, esegui gli script in questo ordine nell'**SQL Editor**:
+
+1. `db_migrazione_utenti_interno_esterno.sql`
+2. `db_migrazione_controllo_gestione_base.sql`
+3. `db_migrazione_blocco_task.sql`
+4. `db_migrazione_import_800.sql`
+5. `import_A_anagrafica.sql`
+6. `import_B_task.sql`
+7. `import_C_altri.sql`
+8. `fix_dati_import_800.sql` (sicuro da rieseguire; aggiorna assegnatari/stati e verifica i conteggi)
+
+> Nota: gli script di import sono idempotenti. Se una riga è già presente, viene saltata tramite `WHERE NOT EXISTS` oppure `ON CONFLICT DO NOTHING`.
+
+### Problemi risolti nell'import 800
+Se l'import dei task falliva, la causa più probabile era una combinazione di:
+
+- colonne `task.id_commessa` e `task.codice_commessa` usate da `import_B_task.sql` ma non create dalla migrazione di import;
+- valori `NULL` espliciti nei task per campi che, dopo `db_migrazione_controllo_gestione_base.sql`, sono `NOT NULL` (`stima_ore_interne`, `ore_consuntive_interne`, `costo_task_esterno`);
+- `stato` task importato a `NULL`, che rende i task poco gestibili/filtrabili nell'app.
+
+Ora `db_migrazione_import_800.sql` crea le colonne tecniche mancanti e `import_B_task.sql`/`import_800_data.sql` impostano valori safe (`stato = 'In corso'`, importi/ore a `0`, booleani a `FALSE`).
+
+### Verifica dopo import
+Dopo l'ultimo script, controlla che i conteggi principali siano valorizzati:
+
+```sql
+SELECT 'commesse' AS tabella, COUNT(*) AS totale
+FROM commesse
+WHERE codice IN ('800','803','805','806','808','811','812','814','817','818','819','820','821','822','823','824')
+UNION ALL
+SELECT 'task', COUNT(*)
+FROM task
+WHERE commessa_ref IN ('800','803','805','806','808','811','812','814','817','818','819','820','821','822','823','824')
+UNION ALL
+SELECT 'task con stato NULL', COUNT(*)
+FROM task
+WHERE stato IS NULL
+  AND commessa_ref IN ('800','803','805','806','808','811','812','814','817','818','819','820','821','822','823','824');
+```
+
+Atteso:
+- `commesse` = 16
+- `task` = 584
+- `task con stato NULL` = 0
+
+
 ## Configurazione manuale notifiche email
 Aggiungi in `.streamlit/secrets.toml` (o variabili ambiente) i seguenti parametri:
 
