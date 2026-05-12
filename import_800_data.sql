@@ -1069,7 +1069,7 @@ INSERT INTO note_commessa (id, id_commessa, tipo_nota, contenuto, origine) VALUE
 SELECT 'clienti' AS tabella, COUNT(*) AS totale FROM clienti WHERE id IN ('CL800','CL803','CL805','CL806','CL808','CL811','CL812','CL814','CL817','CL818','CL819','CL820','CL821','CL822','CL823','CL824')
 UNION ALL SELECT 'utenti', COUNT(*) FROM utenti WHERE nome IN ('LUCA','RAFFAELE','ANNA','BLERTA','CARLO','ENRICO','TRAGNI','NICOLA','VITTORIO','FRANCESCO','SILVIA','PINO','ROSSIGNOLI','ALTAMURA')
 UNION ALL SELECT 'catalogo_prestazioni', COUNT(*) FROM catalogo_prestazioni WHERE id LIKE 'P0%'
-UNION ALL SELECT 'commesse', COUNT(*) FROM commesse WHERE id IN ('C800','C803','C805','C806','C808','C811','C812','C814','C817','C818','C819','C820','C821','C822','C823','C824')
+UNION ALL SELECT 'commesse', COUNT(*) FROM commesse WHERE codice IN ('800','803','805','806','808','811','812','814','817','818','819','820','821','822','823','824')
 UNION ALL SELECT 'task', COUNT(*) FROM task WHERE id_commessa IN ('C800','C803','C805','C806','C808','C811','C812','C814','C817','C818','C819','C820','C821','C822','C823','C824')
 UNION ALL SELECT 'assegnazioni_task', COUNT(*) FROM assegnazioni_task WHERE id LIKE 'A00%'
 UNION ALL SELECT 'contratti', COUNT(*) FROM contratti WHERE id LIKE 'K00%'

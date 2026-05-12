@@ -208,6 +208,8 @@ def import_task(righe: list[dict]) -> int:
         }
         payload.append({
             "commessa_ref":          r.get("codice_commessa") or "",
+            "id_commessa":           r.get("id_commessa") or None,
+            "codice_commessa":       r.get("codice_commessa") or None,
             "descrizione":           r.get("descrizione") or "",
             "assegnato_a":           r.get("assegnato_a_principale") or None,
             "scadenza":              val_date(r.get("scadenza", "")),
