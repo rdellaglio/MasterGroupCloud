@@ -23,22 +23,24 @@ INSERT INTO clienti (id, denominazione, tipo_cliente, codice_fiscale, partita_iv
 INSERT INTO clienti (id, denominazione, tipo_cliente, codice_fiscale, partita_iva, email, telefono, indirizzo, note) VALUES ('CL800', 'MARTOCCIA MARCELLO', 'Privato/Altro', NULL, NULL, NULL, NULL, NULL, NULL) ON CONFLICT (id) DO NOTHING;
 
 -- ============ UTENTI ============
--- 14 record
+-- 14 record (solo colonne esistenti: nome, interno_esterno, costo_orario)
+-- Usa WHERE NOT EXISTS per idempotenza (non c'e' UNIQUE su nome)
+-- NOTA: se questi utenti esistono gia' nel DB (con email/password), le righe vengono saltate.
 
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U001', 'LUCA', 'LUCA', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U002', 'RAFFAELE', 'RAFFAELE', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U003', 'ANNA', 'ANNA', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U004', 'BLERTA', 'BLERTA', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U005', 'CARLO', 'CARLO', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U006', 'ENRICO', 'ENRICO', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U007', 'TRAGNI', 'TRAGNI', NULL, NULL, NULL, 'Esterno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U008', 'NICOLA', 'NICOLA', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U009', 'VITTORIO', 'VITTORIO', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U010', 'FRANCESCO', 'FRANCESCO', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U011', 'SILVIA', 'SILVIA', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U012', 'PINO', 'PINO', NULL, NULL, NULL, 'Interno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U013', 'ROSSIGNOLI', 'ROSSIGNOLI', NULL, NULL, NULL, 'Esterno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
-INSERT INTO utenti (id, nome_visualizzato, nome, cognome, ruolo, email, interno_esterno, costo_orario, attivo, puo_accedere) VALUES ('U014', 'ALTAMURA', 'ALTAMURA', NULL, NULL, NULL, 'Esterno', NULL, TRUE, FALSE) ON CONFLICT (id) DO NOTHING;
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'LUCA', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'LUCA');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'RAFFAELE', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'RAFFAELE');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'ANNA', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'ANNA');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'BLERTA', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'BLERTA');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'CARLO', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'CARLO');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'ENRICO', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'ENRICO');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'TRAGNI', 'Esterno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'TRAGNI');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'NICOLA', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'NICOLA');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'VITTORIO', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'VITTORIO');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'FRANCESCO', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'FRANCESCO');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'SILVIA', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'SILVIA');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'PINO', 'Interno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'PINO');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'ROSSIGNOLI', 'Esterno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'ROSSIGNOLI');
+INSERT INTO utenti (nome, interno_esterno, costo_orario) SELECT 'ALTAMURA', 'Esterno', 30.00 WHERE NOT EXISTS (SELECT 1 FROM utenti WHERE nome = 'ALTAMURA');
 
 -- ============ CATALOGO_PRESTAZIONI ============
 -- 47 record
@@ -1065,7 +1067,7 @@ INSERT INTO note_commessa (id, id_commessa, tipo_nota, contenuto, origine) VALUE
 -- Eseguire per verificare l'importazione:
 
 SELECT 'clienti' AS tabella, COUNT(*) AS totale FROM clienti WHERE id IN ('CL800','CL803','CL805','CL806','CL808','CL811','CL812','CL814','CL817','CL818','CL819','CL820','CL821','CL822','CL823','CL824')
-UNION ALL SELECT 'utenti', COUNT(*) FROM utenti WHERE id IN ('U001','U002','U003','U004','U005','U006','U007','U008','U009','U010','U011','U012','U013','U014')
+UNION ALL SELECT 'utenti', COUNT(*) FROM utenti WHERE nome IN ('LUCA','RAFFAELE','ANNA','BLERTA','CARLO','ENRICO','TRAGNI','NICOLA','VITTORIO','FRANCESCO','SILVIA','PINO','ROSSIGNOLI','ALTAMURA')
 UNION ALL SELECT 'catalogo_prestazioni', COUNT(*) FROM catalogo_prestazioni WHERE id LIKE 'P0%'
 UNION ALL SELECT 'commesse', COUNT(*) FROM commesse WHERE id IN ('C800','C803','C805','C806','C808','C811','C812','C814','C817','C818','C819','C820','C821','C822','C823','C824')
 UNION ALL SELECT 'task', COUNT(*) FROM task WHERE id_commessa IN ('C800','C803','C805','C806','C808','C811','C812','C814','C817','C818','C819','C820','C821','C822','C823','C824')
