@@ -93,7 +93,7 @@ Se l'import dei task falliva, la causa più probabile era una combinazione di:
 - valori `NULL` espliciti nei task per campi che, dopo `db_migrazione_controllo_gestione_base.sql`, sono `NOT NULL` (`stima_ore_interne`, `ore_consuntive_interne`, `costo_task_esterno`);
 - `stato` task importato a `NULL`, che rende i task poco gestibili/filtrabili nell'app.
 
-Ora `db_migrazione_import_800.sql` crea le colonne tecniche mancanti e `import_B_task.sql`/`import_800_data.sql` impostano valori safe (`stato = 'In corso'`, importi/ore a `0`, booleani a `FALSE`).
+Ora `db_migrazione_import_800.sql` crea le colonne tecniche mancanti e installa un trigger di normalizzazione che trasforma i `NULL` importati in valori safe (`stato = 'In corso'`, importi/ore a `0`, booleani a `FALSE`), senza dover modificare massivamente `import_B_task.sql`.
 
 ### Verifica dopo import
 Dopo l'ultimo script, controlla che i conteggi principali siano valorizzati:

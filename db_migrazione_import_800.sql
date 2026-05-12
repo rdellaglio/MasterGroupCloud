@@ -35,6 +35,10 @@ ALTER TABLE task ADD COLUMN IF NOT EXISTS id_prestazione_catalogo TEXT;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS descrizione_libera      BOOLEAN DEFAULT FALSE;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS priorita               TEXT;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS approvato_admin         BOOLEAN DEFAULT FALSE;
+ALTER TABLE task ADD COLUMN IF NOT EXISTS motivazione_blocco      TEXT;
+ALTER TABLE task ADD COLUMN IF NOT EXISTS stima_ore_interne       NUMERIC(8,2) DEFAULT 0;
+ALTER TABLE task ADD COLUMN IF NOT EXISTS ore_consuntive_interne  NUMERIC(8,2) DEFAULT 0;
+ALTER TABLE task ADD COLUMN IF NOT EXISTS costo_task_esterno      NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS spese_task_excel        NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS incarico_excel          NUMERIC(12,2) DEFAULT 0;
 ALTER TABLE task ADD COLUMN IF NOT EXISTS note                    TEXT;
@@ -44,6 +48,27 @@ CREATE INDEX IF NOT EXISTS idx_task_id_commessa_800
 
 CREATE INDEX IF NOT EXISTS idx_task_commessa_ordine_800
     ON task(commessa_ref, ordine_in_scheda);
+
+CREATE OR REPLACE FUNCTION normalize_task_import_800_defaults()
+RETURNS trigger AS $$
+BEGIN
+    NEW.stato := COALESCE(NULLIF(BTRIM(NEW.stato), ''), 'In corso');
+    NEW.descrizione_libera := COALESCE(NEW.descrizione_libera, FALSE);
+    NEW.approvato_admin := COALESCE(NEW.approvato_admin, FALSE);
+    NEW.stima_ore_interne := COALESCE(NEW.stima_ore_interne, 0);
+    NEW.ore_consuntive_interne := COALESCE(NEW.ore_consuntive_interne, 0);
+    NEW.costo_task_esterno := COALESCE(NEW.costo_task_esterno, 0);
+    NEW.spese_task_excel := COALESCE(NEW.spese_task_excel, 0);
+    NEW.incarico_excel := COALESCE(NEW.incarico_excel, 0);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_task_import_800_defaults ON task;
+CREATE TRIGGER trg_task_import_800_defaults
+BEFORE INSERT OR UPDATE ON task
+FOR EACH ROW
+EXECUTE FUNCTION normalize_task_import_800_defaults();
 
 
 -- =============================================================
@@ -199,7 +224,7 @@ CREATE INDEX IF NOT EXISTS idx_note_commessa_id_commessa
 --   AND column_name IN (
 --       'titolo','oggetto','area_pratica','importo_contratto',
 --       'id_commessa','codice_commessa','ordine_in_scheda',
---       'id_prestazione_catalogo','priorita'
+--       'id_prestazione_catalogo','priorita','stima_ore_interne'
 --   )
 -- ORDER BY table_name, column_name;
 --
