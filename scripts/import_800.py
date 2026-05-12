@@ -6,7 +6,7 @@ Legge i CSV dalla cartella locale e li carica nel DB via API REST Supabase.
 Uso:
     export SUPABASE_URL='https://<project>.supabase.co'
     export SUPABASE_KEY='<service-role-key>'
-    python scripts/import_800.py --csv-dir /percorso/Esportazione_800
+    python import_800.py --csv-dir C:/Users/rdell/Downloads/Esportazione_800
 
 I CSV devono essere quelli prodotti dall'esportazione normalizzata:
     commesse.csv, clienti.csv, utenti_collaboratori.csv,
