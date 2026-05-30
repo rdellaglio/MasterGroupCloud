@@ -264,6 +264,18 @@ def safe_number(value, default=0.0):
         return default
 
 
+def optional_number(value):
+    if value in (None, ""):
+        return None
+
+    text = str(value).strip().replace("EUR", "").replace(chr(8364), "").replace(" ", "")
+    if not text:
+        return None
+    if "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    return float(text)
+
+
 def costo_orario_utente(nome_utente, utenti_index):
     u = utenti_index.get(str(nome_utente), {})
     return safe_number(u.get("costo_orario"))
@@ -902,6 +914,7 @@ elif scelta == "📊 Analisi Commesse":
 
             if ruolo == "Admin":
                 st.write(f"💰 Budget: **€ {c.get('budget', 0)}**")
+                st.write(f"📄 Contratto: **€ {safe_number(c.get('importo_contratto')):,.2f}**")
                 st.write(f"💶 Costo totale commessa (interni + esterni): **€ {costo_commessa:,.2f}**")
             st.write(f"👤 PM incaricato: **{pm_commessa}**")
             st.write(f"📌 Stato commessa: **{icona_commessa} {stato_commessa}**")
@@ -910,6 +923,98 @@ elif scelta == "📊 Analisi Commesse":
             )
 
             st.progress(perc / 100)
+
+            if ruolo == "Admin":
+                st.divider()
+                st.subheader("Modifica commessa")
+                commessa_id = c.get("id")
+
+                pm_options = sorted({
+                    usr.get("nome")
+                    for usr in us
+                    if usr.get("nome") and usr.get("ruolo") in ["PM", "Admin"]
+                })
+                if pm_commessa and pm_commessa != "Non assegnato" and pm_commessa not in pm_options:
+                    pm_options.insert(0, pm_commessa)
+                pm_options = [""] + pm_options
+                pm_index = pm_options.index(pm_commessa) if pm_commessa in pm_options else 0
+
+                contratto_options = ["", "Da verificare", "Mancante/Non firmato", "Firmato/Presente"]
+                contratto_corrente = c.get("contratto_stato") or ""
+                if contratto_corrente not in contratto_options:
+                    contratto_options.append(contratto_corrente)
+
+                if not commessa_id:
+                    st.warning("Impossibile modificare questa commessa: identificativo DB mancante.")
+                else:
+                    with st.form(f"form_modifica_commessa_{commessa_id}"):
+                        st.caption(f"Codice commessa: {c.get('codice')}")
+                        edit_col1, edit_col2 = st.columns(2)
+                        nuovo_cliente = edit_col1.text_input("Cliente", value=c.get("cliente") or "")
+                        nuovo_titolo = edit_col2.text_input("Titolo", value=c.get("titolo") or "")
+                        nuovo_oggetto = st.text_input("Oggetto", value=c.get("oggetto") or "")
+
+                        edit_col3, edit_col4, edit_col5 = st.columns(3)
+                        nuovo_budget = edit_col3.text_input("Budget", value="" if c.get("budget") is None else str(c.get("budget")))
+                        nuovo_importo_contratto = edit_col4.text_input(
+                            "Importo contratto",
+                            value="" if c.get("importo_contratto") is None else str(c.get("importo_contratto")),
+                        )
+                        nuova_scadenza = edit_col5.text_input("Scadenza", value=str(c.get("scadenza") or ""))
+
+                        edit_col6, edit_col7 = st.columns(2)
+                        nuovo_pm = edit_col6.selectbox("PM assegnato", pm_options, index=pm_index)
+                        nuovo_contratto_stato = edit_col7.selectbox(
+                            "Stato contratto",
+                            contratto_options,
+                            index=contratto_options.index(contratto_corrente),
+                        )
+
+                        edit_col8, edit_col9 = st.columns(2)
+                        nuova_area = edit_col8.text_input("Area pratica", value=c.get("area_pratica") or "")
+                        nuovo_tipo = edit_col9.text_input("Tipo pratica", value=c.get("tipo_pratica") or "")
+                        nuovo_indirizzo = st.text_input("Indirizzo intervento", value=c.get("indirizzo_intervento") or "")
+                        nuove_note = st.text_area("Note", value=c.get("note") or "")
+
+                        salva_commessa = st.form_submit_button("Salva modifiche commessa")
+
+                if commessa_id and salva_commessa:
+                    nuova_scadenza = nuova_scadenza.strip()
+                    if nuova_scadenza:
+                        try:
+                            date.fromisoformat(nuova_scadenza)
+                        except ValueError:
+                            st.error("Scadenza non valida. Usa il formato AAAA-MM-GG.")
+                            st.stop()
+
+                    try:
+                        budget_salvato = optional_number(nuovo_budget)
+                        importo_contratto_salvato = optional_number(nuovo_importo_contratto)
+                    except ValueError:
+                        st.error("Budget o importo contratto non valido.")
+                        st.stop()
+
+                    payload_commessa = {
+                        "cliente": nuovo_cliente.strip() or None,
+                        "titolo": nuovo_titolo.strip() or None,
+                        "oggetto": nuovo_oggetto.strip() or None,
+                        "budget": budget_salvato,
+                        "importo_contratto": importo_contratto_salvato,
+                        "scadenza": nuova_scadenza or None,
+                        "pm_assegnato": nuovo_pm or None,
+                        "contratto_stato": nuovo_contratto_stato or None,
+                        "area_pratica": nuova_area.strip() or None,
+                        "tipo_pratica": nuovo_tipo.strip() or None,
+                        "indirizzo_intervento": nuovo_indirizzo.strip() or None,
+                        "note": nuove_note.strip() or None,
+                    }
+                    res_commessa = db_update("commesse", commessa_id, payload_commessa)
+                    if res_commessa.status_code in [200, 204]:
+                        st.success("Commessa aggiornata.")
+                        st.rerun()
+                    else:
+                        st.error(f"Errore aggiornamento commessa: {res_commessa.status_code} · {res_commessa.text}")
+
             for tc in t_comm:
                 stato_task = tc.get('stato')
                 icona_task = icona_stato_task(stato_task)
