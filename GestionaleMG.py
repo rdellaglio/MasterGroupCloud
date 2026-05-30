@@ -246,28 +246,43 @@ def utente_e_interno(nome_utente, utenti_index):
     return str(u.get("interno_esterno", "Interno")).lower() == "interno"
 
 
+def safe_number(value, default=0.0):
+    if value in (None, ""):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value).strip().replace("EUR", "").replace(chr(8364), "").replace(" ", "")
+    if not text:
+        return default
+
+    try:
+        if "," in text:
+            text = text.replace(".", "").replace(",", ".")
+        return float(text)
+    except ValueError:
+        return default
+
+
 def costo_orario_utente(nome_utente, utenti_index):
     u = utenti_index.get(str(nome_utente), {})
-    try:
-        return float(u.get("costo_orario", 0) or 0)
-    except Exception:
-        return 0.0
+    return safe_number(u.get("costo_orario"))
 
 
 def costo_totale_task(task, utenti_index):
     assegnato = task.get("assegnato_a")
     if utente_e_interno(assegnato, utenti_index):
-        ore_cons = float(task.get("ore_consuntive_interne", 0) or 0)
+        ore_cons = safe_number(task.get("ore_consuntive_interne"))
         return ore_cons * costo_orario_utente(assegnato, utenti_index)
-    return float(task.get("costo_task_esterno", 0) or 0)
+    return safe_number(task.get("costo_task_esterno"))
 
 
 def costo_previsionale_task(task, utenti_index):
     assegnato = task.get("assegnato_a")
     if utente_e_interno(assegnato, utenti_index):
-        ore_stimate = float(task.get("stima_ore_interne", 0) or 0)
+        ore_stimate = safe_number(task.get("stima_ore_interne"))
         return ore_stimate * costo_orario_utente(assegnato, utenti_index)
-    return float(task.get("costo_task_esterno", 0) or 0)
+    return safe_number(task.get("costo_task_esterno"))
 
 def sync_stato_commessa(codice_commessa, commesse_cache=None, task_cache=None):
     commesse = commesse_cache if commesse_cache is not None else db_get("commesse")
@@ -616,8 +631,8 @@ if scelta == "🏠 Dashboard":
     
     if ruolo == "Admin":
         cs = db_get("commesse")
-        tot_b = sum(float(c.get('budget', 0)) for c in cs)
-        bud_bloccate = sum(float(c.get('budget', 0)) for c in cs if c.get('stato') == 'Bloccato')
+        tot_b = sum(safe_number(c.get('budget')) for c in cs)
+        bud_bloccate = sum(safe_number(c.get('budget')) for c in cs if c.get('stato') == 'Bloccato')
         col4.metric("Budget Totale Commesse", f"€ {tot_b:,.2f}")
         st.info(f"🔒 Budget commesse bloccate: **€ {bud_bloccate:,.2f}**")
     else:
